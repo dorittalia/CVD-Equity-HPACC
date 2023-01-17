@@ -1,0 +1,449 @@
+---
+title: "Best Cascades"
+author: "Dorit Stein"
+date: "12/28/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = TRUE)
+
+rm(list = ls())
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readxl)
+library(astsa)
+library(fuzzyjoin)
+library(plm)
+library(tidyverse)
+library(srvyr)
+library(survey)
+library(purrr)
+
+```
+
+# Cleaning HTN Cascade Variables
+
+```{r}
+
+# load data
+# from script "1 Final Cleaning"
+data <- readRDS("3 Output/analysis.rds")
+
+gdp <- data %>%
+  group_by(Country) %>%
+  summarize(countryGDPclass = mean(countryGDPclass))
+
+# check cascade variables later?
+
+# missing cascade variables
+data_missing <- data %>%
+  group_by(Country) %>%
+  mutate(n = n()) %>%
+  summarize(across(.cols = c(p_id, 
+                             psu_num, 
+                             stratum_num, 
+                             bpms_hypt,
+                            bpms_hypt_med,
+                            bpms_hypt_med_ctl, 
+                            wealth_quintile),
+                list(~sum(is.na(.)),
+                ~n()))) 
+# none missing in cascade variables
+data4 <- data %>% filter(w_bp == 0) %>%group_by(Country) %>% summarize()
+
+
+## 12/29/21
+#  # for now drop solomon islands that is missing n = 5 PSU numbers
+#    # check PSU numbers later - was replaced by HH-ID somehow in Pieries code?
+#data2 <- data %>%
+#  filter(Country != "SOLOMON ISLANDS")
+
+# set survey weight parameters
+# with survey instead of srvyr
+data3 <- data %>%
+  as_survey_design(
+    stratum = stratum_num, 
+    ids = c(psu_num), 
+    weights = w_bp,
+    variables = c(
+      Country,
+      clin_hypt,
+      bpms_hypt,
+      bpms_hypt_med,
+      bpms_hypt_med_ctl,
+      wealth_quintile
+    )
+  )
+
+```
+
+
+# Calculating best performers at each step/overall
+
+```{r}
+# Overall
+# get weighted proportions 
+  # (out of whole dataset of hypertensives, get proportion that are each variable/step in the cascade)
+    ##USE A DIFFERENT PROPORTION METHOD?
+data_n <- data3 %>%
+  group_by(Country) %>%
+  summarize(n_htns = survey_total(clin_hypt, vartype = "ci"),
+            prop_aware = survey_mean(bpms_hypt, proportion = T, vartype = "ci"),
+            prop_tx = survey_mean(bpms_hypt_med, proportion = T, vartype = "ci"),
+            prop_control = survey_mean(bpms_hypt_med_ctl, proportion = T, vartype = "ci")) %>%
+  mutate_at(vars(prop_aware:prop_control_upp), ~(round((. * 100),2)))
+
+# By Quintile
+#summarize cascade proportions with weights, dropping missing wealth_quintile values
+data_q <- data3 %>%
+  group_by(Country, wealth_quintile) %>%
+  summarize(n_htns = survey_total(clin_hypt, vartype = "ci"),
+            prop_aware = survey_mean(bpms_hypt, proportion = T, vartype = "ci"),
+            prop_tx = survey_mean(bpms_hypt_med, proportion = T, vartype = "ci"),
+            prop_control = survey_mean(bpms_hypt_med_ctl, proportion = T, vartype = "ci")) %>%
+  mutate_at(vars(prop_aware:prop_control_upp), ~(round((. * 100),2)))
+
+# by quintile linkage rate (from aware to treated,ie slope of line from aware to treated)
+data_q <- data_q %>%
+  mutate(linkage = prop_tx/prop_aware)
+
+saveRDS(data_n, file = "3 Output/overall_cascades.rds")
+saveRDS(data_q, file = "3 Output/quintile_cascades.rds")
+
+
+```
+
+
+# Cascade Graphs 
+
+```{r Shape data for ggplot}
+# load cascades by quintiles graphs
+
+data_q <- readRDS("3 Output/quintile_cascades.rds")
+
+#get data into long format for ggplot
+cascade_q_data <- data_q %>%
+  select(Country, wealth_quintile, 
+         prop_aware, 
+         prop_tx,  
+        prop_control) %>%
+  pivot_longer(prop_aware:prop_control, names_to = "cascade_variable") 
+
+#shape lower bound to merge back in
+lower <- data_q %>%
+  select(Country, wealth_quintile, 
+         prop_aware_low, 
+         prop_tx_low,
+         prop_control_low) %>%
+  pivot_longer(prop_aware_low:prop_control_low, names_to = "cascade_variable") %>%
+  mutate(cascade_variable = case_when(cascade_variable == "prop_aware_low"  ~ "prop_aware",
+                                      cascade_variable == "prop_tx_low"  ~ "prop_tx",
+                                      cascade_variable == "prop_control_low" ~ "prop_control",
+                                      TRUE ~ cascade_variable)) %>%
+  select(Country, wealth_quintile,cascade_variable,
+         lower = value)
+
+#shape upper bound to merge back in
+upper <- data_q %>%
+  select(Country, wealth_quintile, 
+         prop_aware_upp, 
+         prop_tx_upp,
+         prop_control_upp) %>%
+  pivot_longer(prop_aware_upp:prop_control_upp, names_to = "cascade_variable") %>%
+  mutate(cascade_variable = case_when(cascade_variable == "prop_aware_upp"  ~ "prop_aware",
+                                      cascade_variable == "prop_tx_upp"  ~ "prop_tx",
+                                      cascade_variable == "prop_control_upp" ~ "prop_control",
+                                      TRUE ~ cascade_variable)) %>%
+  select(Country, wealth_quintile,cascade_variable,
+         upper = value)
+
+#join so have column with cascade variable names in each row and the upper and lower bound values next to it for ggplot format
+cascade_q_data2 <- cascade_q_data %>% left_join(lower) %>% left_join(upper)
+
+#factor cascade levels
+cascade_q_data2$cascade_variable <- factor(cascade_q_data$cascade_variable, 
+                                          levels = c("prop_aware", "prop_tx", "prop_control"))
+cascade_q_data2$wealth_quintile <- as.factor(cascade_q_data$wealth_quintile)
+
+cascade_q_data2 <- cascade_q_data2 %>% left_join(gdp)
+
+cascade_q_data2$countryGDPclass <- factor(cascade_q_data2$countryGDPclass,
+                            levels = c("1","2", "3"),
+                            labels = c("Low-income", "Lower-middle Income", "Upper-middle Income"))
+
+```
+
+# Identify best performers
+
+```{r}
+
+#####Identify best performers#####
+#best at each step (irrespective of quintile)
+best_step <- cascade_q_data2 %>%
+  group_by(cascade_variable) %>%
+  filter(value == max(value, na.rm=TRUE))
+
+saveRDS(best_step, file = "3 Output/best_step.rds")
+
+best_step_quintile <-  cascade_q_data2 %>%
+  group_by(cascade_variable, wealth_quintile) %>%
+  filter(value == max(value, na.rm=TRUE))
+
+saveRDS(best_step_quintile, file = "3 Output/best-step-quintile.rds")
+
+####area under curves####
+
+area <- data_q %>%
+  group_by(Country, wealth_quintile) %>%
+  summarize(area1 = (prop_aware+prop_tx)/2,
+            area2 = (prop_tx+prop_control)/2,
+            area_sum = area1 + area2) 
+
+saveRDS(area, file = "3 Output/area-under-quintile-cascades.rds")
+
+best_area <- area %>%
+  group_by(wealth_quintile) %>%
+  filter(area_sum == max(area_sum, na.rm = T))
+
+saveRDS(best_area, file = "3 Output/best-area-under-quintile-cascades.rds")
+
+```
+
+## Cascade by quintile graphs
+
+# individual countries
+
+```{r graph ggplot fx}
+# country vector
+countries <- c(unique(cascade_q_data2$Country))
+countries = set_names(countries)
+
+# graph all countries together w/ facet wrap #
+
+plot_all <- ggplot(data = cascade_q_data2, 
+                aes(x = factor(cascade_variable), 
+                    y = value, 
+                    group = wealth_quintile, 
+                    colour = wealth_quintile)) +
+  geom_line(stat = "identity") +
+  geom_point() +
+  #geom_errorbar(aes(ymin=lower, ymax=upper), width=.1) +
+  #geom_ribbon(aes(ymin=lower, ymax=upper), linetype=2, alpha=0.1) +
+  labs(y = "Percent of Hypertensives", x = "") +
+  scale_x_discrete(labels=c("prop_aware" = "Aware", "prop_tx" = "Treat",
+                            "prop_control" = "Control")) +
+  guides(colour=guide_legend(title="Wealth Quintile")) +
+    #ggtitle(x) +
+  theme_minimal() +
+    theme(legend.position="bottom") +
+  theme(axis.text=element_text(size=6),    
+        axis.title=element_text(size=5,face="bold"),
+        strip.text = element_text(size=6)) +
+  facet_wrap(~Country, labeller = label_wrap_gen(width=15))
+
+ggsave("Graphs/all-country-cascades.png", plot = plot_all)
+
+plot_all
+```
+
+# Overall - by income category (one plot)
+
+```{r}
+
+saveRDS(cascade_q_data2, file = "3 Output/cascade_q_data2_graphing.rds")
+
+library(ggrepel)
+library(scales)
+#coded by country w ccode label
+## ADD CCODE LABEL
+label_cascades <- ggplot(data = cascade_q_data2, 
+               aes(x = factor(cascade_variable), 
+                    y = value, 
+                    group = wealth_quintile, 
+                    colour = wealth_quintile)) +
+  #geom_line(stat = "identity") +
+                   #,
+                   #label = plot_label)) +
+                   #shape = name)) +
+  #geom_boxplot(outlier.alpha = 0.0, aes(color = tx_gap_rank)) +
+  #geom_jitter(position="jitter", alpha = 0.5) +
+  #geom_jitter(position = position_jitter(seed = 0.1), alpha = 0.5) +
+  #geom_text(position = position_jitter(seed = 1), size = 2) +
+  #geom_text_repel(width = 0.1, size = 2,max.overlaps = Inf) +
+  # stat_summary(aes(y = value, group = factor(wealth_quintile2)), fun.y=mean, colour="red", geom="line", size = 3)  +
+ stat_summary(
+   geom = "line",
+   aes(group = wealth_quintile),
+   #geom = "point",
+   fun= "mean",
+   #col = cascade_q_data2$wealth_quintile,
+   #size = 0.3,
+   #shape = 24,
+   #fill = "red"
+ ) +
+    #position = position_jitter(seed = 0.1), size = 1.5,max.overlaps = Inf) +
+  #geom_smooth(aes(group = auc_gap_rank2), fill="grey75", alpha=0.5, 
+  #            #linetype="solid",
+  #            se=F, formula = y ~ x, method = "loess", size=0.5, fullrange=T) +
+  scale_y_continuous(labels = comma) +
+  scale_x_discrete(labels = c("Aware", "Treated", "Controlled"), expand = c(0.05,0.05)) +
+  guides(fill=guide_legend(title="Wealth Quintile")) +
+  labs(y = "Proportion of People Living with Hypertension", x = "",
+       color = "Wealth Quintile") +
+  ggtitle("Cascades by Wealth Quintile and Country Income Group") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        panel.spacing.x = unit(2,"mm"),
+        axis.text.x = element_text(angle = -40)) +
+  theme(aspect.ratio=18/20) +
+  facet_wrap(~countryGDPclass)
+             #ncol=1) 
+
+label_cascades
+
+```
+
+## individual countries by income group (for appendix)
+
+# low income
+
+```{r}
+# countries by income category
+data2 <- cascade_q_data2 %>%
+  filter(countryGDPclass == "Low-income")
+data3 <- cascade_q_data2 %>%
+  filter(countryGDPclass == "Lower-middle Income")
+data4 <- cascade_q_data2 %>%
+  filter(countryGDPclass == "Upper-middle Income")
+
+
+# low income cascades by country and quintile
+label_cascades_li <- ggplot(data = data2, 
+               aes(x = factor(cascade_variable), 
+                    y = value, 
+                    group = wealth_quintile, 
+                    colour = wealth_quintile)) +
+  geom_line(stat = "identity") +
+  scale_y_continuous(labels = comma) +
+  scale_x_discrete(labels = c("Aware", "Treated", "Controlled"), expand = c(0.05,0.05)) +
+  guides(fill=guide_legend(title="Wealth Quintile")) +
+  labs(y = "Proportion of People Living with Hypertension", x = "",
+       color = "Wealth Quintile") +
+  ggtitle("Cascades by Wealth Quintile - Low-Income Countries") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        panel.spacing.x = unit(2,"mm"),
+        axis.text.x = element_text(angle = -40),
+        strip.text = element_text(size = 6, margin = margin())) +
+  theme(aspect.ratio=10/20) +
+  #coord_fixed(0.5) +
+  facet_wrap(~Country) 
+             #, ncol=3) 
+
+label_cascades_li
+
+```
+
+# upper middle income
+```{r}
+# uppermiddle income cascades by country and quintile
+label_cascades_mi <- ggplot(data = data4, 
+               aes(x = factor(cascade_variable), 
+                    y = value, 
+                    group = wealth_quintile, 
+                    colour = wealth_quintile)) +
+  geom_line(stat = "identity") +
+  scale_y_continuous(labels = comma) +
+  scale_x_discrete(labels = c("Aware", "Treated", "Controlled"), expand = c(0.05,0.05)) +
+  guides(fill=guide_legend(title="Wealth Quintile")) +
+  labs(y = "Proportion of People Living with Hypertension", x = "",
+       color = "Wealth Quintile") +
+  ggtitle("Cascades by Wealth Quintile - Upper-middle Income Countries") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        panel.spacing.x = unit(2,"mm"),
+        axis.text.x = element_text(angle = -40),
+        strip.text = element_text(size = 6, margin = margin())) +
+  theme(aspect.ratio=10/20) +
+  #coord_fixed(0.5) +
+  facet_wrap(~Country) 
+             #, ncol=3) 
+
+label_cascades_mi
+```
+# lower middle income
+```{r}
+# low income cascades by country and quintile
+label_cascades_lm <- ggplot(data = data3, 
+               aes(x = factor(cascade_variable), 
+                    y = value, 
+                    group = wealth_quintile, 
+                    colour = wealth_quintile)) +
+  geom_line(stat = "identity") +
+  scale_y_continuous(labels = comma) +
+  scale_x_discrete(labels = c("Aware", "Treated", "Controlled"), expand = c(0.05,0.05)) +
+  guides(fill=guide_legend(title="Wealth Quintile")) +
+  labs(y = "Proportion of People Living with Hypertension", x = "",
+       color = "Wealth Quintile") +
+  ggtitle("Cascades by Wealth Quintile - Lower-middle Income Countries") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        panel.spacing.x = unit(2,"mm"),
+        axis.text.x = element_text(angle = -40),
+        strip.text = element_text(size = 6, margin = margin())) +
+  theme(aspect.ratio=10/20) +
+  #coord_fixed(0.5) +
+  facet_wrap(~Country) 
+             #, ncol=3) 
+
+label_cascades_lm
+```
+
+
+```{r graph ggplot fx}
+#####graph country individually####
+#countries vector from other script
+plot_cascades <- function(x) {
+  
+  cascade_q_data3 <- cascade_q_data2 %>% filter(Country == x)
+  
+  plot4 <- ggplot(data = cascade_q_data3, 
+                aes(x = factor(cascade_variable), 
+                    y = value, 
+                    group = wealth_quintile, 
+                    colour = wealth_quintile)) +
+  geom_line(stat = "identity") +
+  geom_point() +
+  #geom_errorbar(aes(ymin=lower, ymax=upper), width=.1) +
+  #geom_ribbon(aes(ymin=lower, ymax=upper), linetype=2, alpha=0.1) +
+  labs(y = "Percent of Hypertensives", x = "") +
+  scale_x_discrete(labels=c("prop_aware" = "Aware", "prop_tx" = "Treated",
+                            "prop_control" = "Control")) +
+  guides(colour=guide_legend(title="Wealth Quintile")) +
+    ggtitle(x) +
+  theme_light() +
+    theme(legend.position="bottom")
+  
+  plot4
+  
+}
+
+plots <- map(countries, ~plot_cascades(.))
+
+#ggsave(
+#  "Images/albania.png",
+#  plot = plots$ALBANIA)
+
+plots$ALBANIA
+plots$CHINA
+plots$INDIA
+plots$INDONESIA
+plots$`RUSSIAN FEDERATION`
+plots$KAZAKHSTAN
+
+
+```
+
