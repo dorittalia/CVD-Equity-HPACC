@@ -1,0 +1,776 @@
+---
+title: "CVD Prelim Results Tables and Figures"
+author: "Dorit Stein"
+date: "1/17/2023"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE, message = FALSE}
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+
+rm(list = ls())
+
+library(tidyverse)
+library(ggrepel)
+library(astsa)
+library(fuzzyjoin)
+library(purrr)
+library(knitr)
+library(srvyr)
+library(scales)
+library(survey)
+library(globorisk)
+library(data.table)
+library(countrycode) # turn country codes into pretty names
+library(gridExtra)   # a helper for arranging individual ggplot objects
+library(ggthemes)    # has a clean theme for ggplot2
+library(viridis)     # best. color. palette. evar.
+library(knitr)       # kable : prettier data.frame output
+## tableone package itself
+library(tableone)
+library(kableExtra)
+library(iNZightTools) # for survey_IQR
+
+library(paletteer)
+library(ggforce)
+
+library(tidyverse)
+library(hrbrthemes)
+library(patchwork)
+library(GGally)
+library(viridis)
+
+```
+
+# LOAD DATA + make adjustments
+
+# Add baseline values in for senario outcomes for targets + Niger
+Scenario 1:
+-mean cvd risk is same as baseline for Niger Q2, Mongolia Q3
+  -mean difference in cvd cases: 0
+  -mean % change in cvd cases: 0
+  -mean cvd risk: baseline value
+Scenario 2:
+-mean cvd risk is same as baseline for Kazakhstan Q4
+  -mean differnece in cvd cases: 0
+  -mean % change in cvd cases: 0
+  -mean cvd risk: baseline value
+
+```{r load data}
+# scenario results separately
+s1_calcs <- readRDS("3 Output/s1_calcs.rds")
+s2_calcs <- readRDS("3 Output/s2_calcs.rds")
+baseline2 <- readRDS("3 Output/baseline2.rds")
+
+# combined results
+scenario_calcs <- readRDS("3 Output/all-scenarios.rds") 
+scenario_calcs_baseline <- readRDS("3 Output/all-scenarios-baseline.rds") 
+
+#relative combined results
+scenario_calcs_rel <- scenario_calcs %>%
+  filter(measure == "mean_rel_c")
+# absolute combined results
+scenario_calcs_abs <- scenario_calcs %>%
+  filter(measure == "mean_risk_d")
+
+# full dataset
+all <- readRDS(file = "3 Output/all.rds") %>%
+  mutate(country = Country)
+
+# ccodes
+ccodes <- all %>%
+  select(country, ccodes) %>%
+  distinct()
+
+# countrygdp class
+gdp <- all %>%
+  select(country, countryGDPclass) %>%
+  distinct()
+
+# merge in relevant country-quintile level info?
+
+# create graphing datasets
+# add in baseline values for missing target country-quintiles+Niger
+  #Mongolia Q3 - Scenario 1
+  #Niger Q2 - Scenario 1
+  #Kazakhstan - Q4 - Scenario 2
+## fixing targets + Niger in scenario outcomes)
+mong <- baseline2 |>
+  filter(country == "Mongolia" & wealth_quintile == "3") |>
+  mutate(scenario = case_when(scenario == "Baseline" ~ "Scenario 1: Diagnosis"))
+
+niger <- baseline2 |>
+  filter(country == "Niger" & wealth_quintile == "2") |>
+  mutate(scenario = case_when(scenario == "Baseline" ~ "Scenario 1: Diagnosis"))
+
+kaz <- baseline2 |>
+  filter(country == "Kazakhstan" & wealth_quintile == "4") |>
+    mutate(scenario = case_when(scenario == "Baseline" ~ "Scenario 2: Treatment"))
+## end fixing
+
+mean_risk <- scenario_calcs_baseline |>
+  filter(name == "Mean CVD Risk (%)") |>
+  rbind(mong, kaz, niger) |> # add in Mong, Kaz, Niger baseline values as scenario outcomes
+  left_join(ccodes)
+
+# for figure 1
+
+mean_risk$wealth_quintile <- factor(mean_risk$wealth_quintile,
+                                     levels = c("1", "2", "3", "4", "5"),
+                                      labels= c("Q1", "Q2", "Q3", "Q4", "Q5"))
+
+difference <- mean_risk %>% 
+  arrange(country, scenario, wealth_quintile) %>%
+  mutate(mean = ifelse(is.na(lower), mean, paste0(mean))) %>%
+  dplyr::select(country,
+                scenario, 
+         wealth_quintile, 
+         mean)  %>%
+  pivot_wider(names_from = "wealth_quintile", values_from = "mean") %>%
+  mutate(difference5_1 = as.numeric(Q5)-as.numeric(Q1),
+         difference1_5 = as.numeric(Q1)-as.numeric(Q5),
+         difference_abs = abs(difference1_5))
+
+
+gap <- readRDS("3 Output/area2.rds") %>% rename(country = Country)
+
+## to add 0 mean diff and 0 rel change for targets + Niger in scenario 1/2
+niger_a <- scenario_calcs_abs |>
+  filter(country == "Niger" & wealth_quintile == "2") |>
+  mutate(scenario = case_when(scenario == "Scenario 2: Treatment" ~ "Scenario 1: Diagnosis"),
+         mean = 0,
+         lower = 0,
+         upper = 0)
+
+mong_a <- scenario_calcs_abs |>
+  filter(country == "Mongolia" & wealth_quintile == "3") |>
+  mutate(scenario = case_when(scenario == "Scenario 2: Treatment" ~ "Scenario 1: Diagnosis"),
+         mean = 0,
+         lower = 0,
+         upper = 0)
+
+kaz_a <- scenario_calcs_abs |>
+  filter(country == "Kazakhstan" & wealth_quintile == "4") |>
+  mutate(scenario = case_when(scenario == "Scenario 1: Diagnosis" ~ "Scenario 2: Treatment"),
+         mean = 0,
+         lower = 0,
+         upper = 0)
+
+niger_r <- scenario_calcs_rel |>
+  filter(country == "Niger" & wealth_quintile == "2") |>
+  mutate(scenario = case_when(scenario == "Scenario 2: Treatment" ~ "Scenario 1: Diagnosis"),
+         mean = 0,
+         lower = 0,
+         upper = 0)
+
+mong_r <- scenario_calcs_rel |>
+  filter(country == "Mongolia" & wealth_quintile == "3") |>
+  mutate(scenario = case_when(scenario == "Scenario 2: Treatment" ~ "Scenario 1: Diagnosis"),
+         mean = 0,
+         lower = 0,
+         upper = 0)
+
+kaz_r <- scenario_calcs_rel |>
+  filter(country == "Kazakhstan" & wealth_quintile == "4") |>
+  mutate(scenario = case_when(scenario == "Scenario 1: Diagnosis" ~ "Scenario 2: Treatment"),
+         mean = 0,
+         lower = 0,
+         upper = 0)
+##
+
+abs <- scenario_calcs_abs %>%
+  rbind(kaz_a, mong_a, niger_a) %>%
+  left_join(gdp) %>%
+  left_join(gap) %>%
+    mutate(scenario = case_when(scenario == "Baseline" ~ "Baseline",
+                                scenario == "Scenario 1: Diagnosis" ~ "Diagnosis scenario",
+                                scenario == "Scenario 2: Treatment" ~ "Treatment scenario"))
+
+rel <- scenario_calcs_rel %>%
+  rbind(kaz_r, mong_r, niger_r) %>%
+  left_join(gdp) %>%
+  left_join(gap)
+  
+# to add later
+#   mutate(countryGDPclass = case_when(countryGDPclass == "Low Income Country" ~ "1",
+#                                      countryGDPclass == "Lower-middle Income Country" ~ "2",
+#                                      countryGDPclass == "Upper-middle Income Country" ~ "3",
+#                                      TRUE ~ countryGDPclass))
+# 
+abs$auc_gap_rank <- factor(abs$auc_gap_rank,
+                            levels = c("1","2", "3"),
+                            labels = c("Low Gap", "Mid Gap", "High Gap"))
+abs$wealth_quintile <- factor(abs$wealth_quintile,
+                                     levels = c("1", "2", "3", "4", "5"),
+                                      labels= c("Q1", "Q2", "Q3", "Q4", "Q5"))
+rel$auc_gap_rank <- factor(rel$auc_gap_rank,
+                            levels = c("1","2", "3"),
+                            labels = c("Low Gap", "Mid Gap", "High Gap"))
+rel$wealth_quintile <- factor(rel$wealth_quintile,
+                                     levels = c("1", "2", "3", "4", "5"),
+                                      labels= c("Q1", "Q2", "Q3", "Q4", "Q5"))
+
+#mean_risk$wealth_quintile <- factor(mean_risk$wealth_quintile,
+#                                     levels = c("1", "2", "3", "4", "5"),
+#                                      labels= c("Q1", "Q2", "Q3", "Q4", "Q5"))
+
+cascades <- readRDS("3 Output/cascade-graph.rds")
+
+# to load into appendix file later
+saveRDS(abs, "3 Output/abs.rds")
+saveRDS(rel, "3 Output/rel.rds")
+saveRDS(mean_risk, "3 Output/mean_risk.rds")
+
+saveRDS(difference, "3 Output/difference-cvd-risk.rds")
+
+#colors for quintile groups
+blu_purp <- c("#8c96c6","#8c6bb1", "#88419d", "#810f7c", "#4d004b")
+green <- c("#78c679", "#41ab5d", "#238443", "#005a32", "#004529")
+purp_pink <- c("#f768a1", "#dd3497", "#ae017e", "#7a0177", "#49006a")
+purple <- c("#9e9ac8", "#807dba", "#6a51a3", "#54278f", "#3f007d")
+green_blu <- c("#67a9cf", "#3690c0", "#02818a", "#016c59", "#014636")
+red<- c("#fc8d59", "#ef6548", "#d7301f", "#b30000", "#7f0000")
+red_yellow<- c("#fe9929", "#ec7014", "#cc4c02", "#993404", "#662506")
+blues<- c("#6baed6", "#4292c6", "#2171b5", "#08519c", "#08306b")
+```
+
+# load scenario results
+Calculate # of cases by quintile etc 
+
+```{r}
+# from 3 results tables script
+abs2 <- readRDS("3 Output/abs.rds")
+#saveRDS(rel, "3 Output/rel.rds")
+
+htn_quintile <- readRDS(file ="3 Output/htn-quintile.rds")
+pop_quintile <- readRDS(file = "3 Output/pop_quint_forty_plus.rds") # from "A Population Totals.RMD" script
+
+data <- left_join(htn_quintile, pop_quintile)
+
+htn_n <- data %>%
+  mutate(number_htn = round(mean_htn*quintile_pop,0)) %>%
+  rename(country = Country)  
+
+htn_n$wealth_quintile <- factor(htn_n$wealth_quintile,
+                                     levels = c("1", "2", "3", "4", "5"),
+                                      labels= c("Q1", "Q2", "Q3", "Q4", "Q5"))
+
+htn_abs <- htn_n %>%
+  left_join(abs2) %>%
+  mutate(per_diff = mean/1000,
+         abs_case_diff = number_htn*per_diff) %>%
+    mutate(scenario = case_when(scenario == "Baseline" ~ "Baseline",
+                                scenario == "Scenario 1: Diagnosis" ~ "Diagnosis scenario",
+                                scenario == "Scenario 2: Treatment" ~ "Treatment scenario"))  
+
+# no weights (i.e. weighted by population/number of htns - bigger countries contribute more to the numbers)
+abs_diff <- htn_abs %>%
+  group_by(wealth_quintile, scenario) %>%
+  summarize(abs_case_diff = sum(abs_case_diff, na.rm = T)) %>%
+  ungroup() %>%
+  group_by(scenario) %>%
+  mutate(sum = sum(abs_case_diff),
+         prop = abs_case_diff/sum)
+
+# proportion of cases in bottom quintiles BY COUNTRY - take average (like equal weighting?)
+abs_diff <- htn_abs %>%
+  group_by(country, wealth_quintile, scenario) %>%
+  mutate(abs_case_diff = sum(abs_case_diff, na.rm = T),
+            n_htn = sum(number_htn)) %>%
+  ungroup() %>%
+  group_by(country, scenario) %>%
+  mutate(sum = sum(abs_case_diff),
+         prop = abs_case_diff/sum,
+         sum_htn = sum(n_htn),
+         prop_htn = n_htn/sum_htn) 
+
+# avg by scenario
+abs_diff_avg_overall <- abs_diff %>%
+  group_by(wealth_quintile, scenario) %>%
+ summarize(avg_diff = mean(prop),
+            avg_htn_prop = mean(prop_htn)) 
+
+write.csv(abs_diff_avg_overall, "3 Output/avg-prop-cases-averted.csv")
+
+# long
+abs_diff_avg <- abs_diff %>%
+  group_by(wealth_quintile, scenario) %>%
+ summarize(avg_diff = mean(prop),
+            avg_htn_prop = mean(prop_htn)) %>%
+  pivot_longer(cols = avg_diff:avg_htn_prop)
+
+# avg by GDP
+abs_diff_avg <- abs_diff %>%
+  group_by(wealth_quintile, scenario, countryGDPclass) %>%
+ summarize(avg_diff = mean(prop),
+            avg_htn_prop = mean(prop_htn)) %>%
+  pivot_longer(cols = avg_diff:avg_htn_prop)
+
+# total abs cases averted
+abs_diff_total <- htn_abs %>%
+  group_by(scenario) %>%
+  mutate(sum_scenario = sum(abs_case_diff))
+
+abs_diff_total2<- abs_diff_total %>%
+  group_by(scenario, wealth_quintile) %>% 
+  summarize(abs_case_diff = round(sum(abs_case_diff, na.rm = T),0),
+            prop_cases = round((abs_case_diff/sum_scenario), 3)) %>%
+  unique()
+
+write.csv(abs_diff_total2, "3 Output/total-cases-averted.csv")
+
+abs_diff_total_lmic <- htn_abs %>%
+  group_by(scenario, countryGDPclass) %>%
+  mutate(sum_scenario = sum(abs_case_diff))
+
+abs_diff_total3<- abs_diff_total_lmic %>%
+  group_by(scenario, wealth_quintile, countryGDPclass) %>% 
+  summarize(abs_case_diff = round(sum(abs_case_diff, na.rm = T),0),
+            prop_cases = round((abs_case_diff/sum_scenario), 3)) %>%
+  unique()
+
+abs_diff_total4 <- abs_diff_total_lmic %>%
+  group_by(scenario, wealth_quintile, countryGDPclass) %>% 
+  summarize(abs_case_diff = round(sum(abs_case_diff, na.rm = T),0),
+            total_htns = sum(number_htn),
+            per_capita_averted = abs_case_diff/total_htns,
+            averted_rate = round((per_capita_averted*1000),2)) %>%
+  unique()
+
+```
+
+
+# Table 1 
+
+```{r}
+
+data_table1 <- all %>%
+  as_survey_design(
+    stratum = stratum_num,
+    ids = c(psu_num),
+    weights = w_bp,
+    variables = c(country, age, sex, bmi, csmoke, sbp))
+
+country_n <- data_table1 %>%
+  group_by(country) %>%
+  summarize(Number=n())
+
+saveRDS(country_n, "3 Output/country_n.rds")
+
+#country_n <- readRDS("3 Output/country_n.rds")
+
+table1_median <- data_table1 %>%
+  group_by(country) %>%
+  summarize(Age = survey_median(age),
+            age_high = max(age),
+            age_low = min(age),
+         Female = survey_mean(sex),
+         BMI = survey_median(bmi),
+         bmi_iqr = survey_quantile(bmi, quantiles = c(0.25, 0.75)),
+         Smoking = survey_mean(csmoke),
+         SBP = survey_median(sbp),
+         sbp_iqr =survey_quantile(sbp, quantiles = c(0.25, 0.75)))
+
+# htn prev
+htn <- readRDS("3 Output/htn-country.rds")
+htn2 <- htn %>%
+    mutate(across(c(mean_htn, mean_htn_low, mean_htn_upp), ~format(round(.*100, digits=1)))) %>%
+  rename(country = Country)
+
+# merge htn prev, country N          
+table1_2 <- table1_median %>% 
+  left_join(htn2) %>% 
+  left_join(country_n) 
+#%>%
+  #mutate(across(c(mean_htn, mean_htn_low, mean_htn_upp), ~format(round(.*100, digits=1))))
+
+saveRDS(table1_2, "3 Output/table1-unformatted.rds")
+
+table1_2 <- readRDS("3 Output/table1-unformatted.rds")
+
+#table1_median <- readRDS("3 Output/table1-unformatted.rds")
+
+countries <- table1 %>%
+  select(country)
+
+# Formatted table 1 dataframe
+table1_format <- table1_2 %>%
+  select(-c(Age_se, Female_se, BMI_se, bmi_iqr_q25_se, bmi_iqr_q75_se, Smoking_se, SBP_se, sbp_iqr_q25_se,
+            sbp_iqr_q75_se)) %>%
+  mutate(across(!country, ~as.numeric(.))) %>%
+  #mutate(n = format(round(as.numeric(n), digits=0), nsmall = 0),
+  #       Age = format(round(Age, digits=0), nsmall = 0),
+  #       age_high = format(round(age_high, digits=0), nsmall = 0),
+  #       age_low = format(round(age_low, digits=0), nsmall = 0)) %>%
+  mutate(across(c(Female, Smoking), ~.*100)) %>%
+  mutate(across(c(Age, Female, age_high, age_low), ~format(round(., digits=0), nsmall = 0))) %>%
+  mutate(across(!c(country, Age, Female, age_high, age_low), ~format(round(., digits=1), nsmall = 1))) %>%
+  #mutate(across(c(n, Age, age_high, age_low), ~format(round(., digits=0), nsmall = 1))) %>%
+  transmute(Country = country,
+            "N*" = round(as.numeric(Number),0),
+            "Median Age" = Age,
+            "Age Range" = paste0(age_low, "-", age_high),
+            "Female (%)" = paste0(Female),
+            "Median BMI (IQR)" = paste0(BMI, " ","(", bmi_iqr_q25, ",", bmi_iqr_q75, ")"),
+            "Currently Smoking (%)" = paste0(Smoking),
+            "Median SBP (IQR)" = paste0(SBP, " ","(", sbp_iqr_q25, ",", sbp_iqr_q75, ")"),
+            "Hypertension Prevalence (95% CI)" = paste0(mean_htn, " ","(", mean_htn_low, ",", mean_htn_upp, ")"))
+
+# Formatted table output
+#kable(table1_format) %>% kable_styling(latex_options = c("HOLD_position", "scale_down"))
+
+kbl(table1_format, caption = "Table 1: Weighted distribution of cardiovascular disease risk factors in participants ages 40-80 years from population-based surveys conducted in 52 low- and middle-income countries", booktabs = T) %>% kable_styling(latex_options = c("striped", "hold_position")) %>%
+  footnote(symbol = c("Unweighted sample size", "Among total population in each country"), footnote_as_chunk = T)
+
+saveRDS(table1_format, "3 Output/table1-formatted.rds")
+
+#outputted to Word in script: '4 Table 1 to Word'
+
+```
+
+# Figure 1
+Calculate mean + 95% CI for country groups (low, low-middle, middle-income)
+
+```{r calculate cascades by country level income group}
+
+# set survey weight parameters
+# with survey package
+data5 <- all %>%
+  as_survey_design(
+    stratum = stratum_num, 
+    ids = c(psu_num), 
+    weights = w_bp,
+    variables = c(
+      Country,
+      clin_hypt,
+      bpms_hypt,
+      bpms_hypt_med,
+      bpms_hypt_med_ctl,
+      wealth_quintile,
+      countryGDPclass
+    )
+  )
+
+# Overall
+# get weighted proportions 
+  # out of whole dataset of hypertensives, get proportion that are each variable/step in the cascade
+
+data_n <- data5 %>%
+  group_by(countryGDPclass, wealth_quintile) %>%
+  summarize(prop_aware = survey_mean(bpms_hypt, proportion = T, vartype = "ci"),
+            prop_tx = survey_mean(bpms_hypt_med, proportion = T, vartype = "ci"),
+            prop_control = survey_mean(bpms_hypt_med_ctl, proportion = T, vartype = "ci")) %>%
+  mutate_at(vars(prop_aware:prop_control_upp), ~(round((. * 100),2)))
+
+#get data into long format for ggplot
+cascade_q_data <- data_n %>%
+  select(countryGDPclass, wealth_quintile, 
+         prop_aware, 
+         prop_tx,  
+        prop_control) %>%
+  pivot_longer(prop_aware:prop_control, names_to = "cascade_variable") 
+
+#shape lower bound to merge back in
+lower <- data_n %>%
+  select(countryGDPclass, wealth_quintile, 
+         prop_aware_low, 
+         prop_tx_low,
+         prop_control_low) %>%
+  pivot_longer(prop_aware_low:prop_control_low, names_to = "cascade_variable") %>%
+  mutate(cascade_variable = case_when(cascade_variable == "prop_aware_low"  ~ "prop_aware",
+                                      cascade_variable == "prop_tx_low"  ~ "prop_tx",
+                                      cascade_variable == "prop_control_low" ~ "prop_control",
+                                      TRUE ~ cascade_variable)) %>%
+  select(countryGDPclass, wealth_quintile,cascade_variable,
+         lower = value)
+
+#shape upper bound to merge back in
+upper <- data_n %>%
+  select(countryGDPclass, wealth_quintile, 
+         prop_aware_upp, 
+         prop_tx_upp,
+         prop_control_upp) %>%
+  pivot_longer(prop_aware_upp:prop_control_upp, names_to = "cascade_variable") %>%
+  mutate(cascade_variable = case_when(cascade_variable == "prop_aware_upp"  ~ "prop_aware",
+                                      cascade_variable == "prop_tx_upp"  ~ "prop_tx",
+                                      cascade_variable == "prop_control_upp" ~ "prop_control",
+                                      TRUE ~ cascade_variable)) %>%
+  select(countryGDPclass, wealth_quintile,cascade_variable,
+         upper = value)
+
+#join so have column with cascade variable names in each row and the upper and lower bound values next to it for ggplot format
+cascade_q_data2 <- cascade_q_data %>% left_join(lower) %>% left_join(upper)
+
+#factor cascade levels
+cascade_q_data2$cascade_variable <- factor(cascade_q_data$cascade_variable, 
+                                          levels = c("prop_aware", "prop_tx", "prop_control"))
+cascade_q_data2$wealth_quintile <- as.factor(cascade_q_data$wealth_quintile)
+
+#cascade_q_data2 <- cascade_q_data2 %>% 
+ # left_join(gdp)
+
+#cascade_q_data2$countryGDPclass <- factor(cascade_q_data2$countryGDPclass,
+#                            levels = c("1","2", "3"),
+#                            labels = c("Low-income", "Lower-middle Income", "Upper-middle Income"))
+
+prop_htn2 <- cascade_q_data2 %>%
+  group_by(wealth_quintile, countryGDPclass) %>%
+ summarize(cascade_variable = "prop_htn",
+         value = 100,
+         lower = 100,
+         upper = 100)
+
+cascade_q_data3 <- cascade_q_data2 %>%
+  rbind(prop_htn2) %>%
+  arrange(cascade_variable, value)
+
+cascade_q_data3$cascade_variable <- factor(cascade_q_data3$cascade_variable,
+                                        levels = c("prop_htn","prop_aware","prop_tx", "prop_control"),
+                                        labels = c("Hypertensives", "Aware", "Treated", "Controlled"))
+cascade_q_data3$wealth_quintile <- factor(cascade_q_data3$wealth_quintile,
+                                     levels = c("1", "2", "3", "4", "5"),
+                                      labels= c("Q1", "Q2", "Q3", "Q4", "Q5"))
+
+saveRDS(cascade_q_data3, "3 Output/cascade-graph-country-income-group.rds")
+ 
+```
+
+```{r bar graph cascades}
+
+library(shades)
+library(RColorBrewer)
+
+cascade_country <- readRDS("3 Output/cascade-graph-country-income-group.rds")
+
+# colors
+blu_purp <- c("#8c96c6","#8c6bb1", "#88419d", "#810f7c", "#4d004b")
+green <- c("#78c679", "#41ab5d", "#238443", "#005a32", "#004529")
+purp_pink <- c("#f768a1", "#dd3497", "#ae017e", "#7a0177", "#49006a")
+purple <- c("#9e9ac8", "#807dba", "#6a51a3", "#54278f", "#3f007d")
+green_blu <- c("#67a9cf", "#3690c0", "#02818a", "#016c59", "#014636")
+
+df <- cascade_country %>%
+  filter(cascade_variable != "Hypertensives")
+
+# Create a ggplot with 18 colors 
+# Use scale_fill_manual
+#ggplot(df) + 
+#  geom_col(aes(name, Sepal.Length, fill = factor(Sepal.Length))) +
+#  scale_fill_manual(values = mycolors) +
+#  theme_minimal() +
+#  theme(legend.position = "top")
+# lines
+ggplot(data = df, 
+               aes(x = factor(cascade_variable),
+                 #x = factor(cascade_variable), 
+                    y = value,
+                   #group = Country,
+                    group = wealth_quintile, 
+                    fill = wealth_quintile)) +
+  geom_col(position = "dodge") +
+  geom_errorbar(aes(ymin = lower, ymax = upper,
+                    group = wealth_quintile,
+                    color = wealth_quintile),
+                position = "dodge") +
+  scale_y_continuous(labels = comma) +
+  #scale_x_discrete(labels = c("Q1", "", "Treated", "Controlled"), expand = c(0.05,0.05)) +
+  guides(fill=guide_legend(title="Wealth Quintile")) +
+  labs(y = "People Living with Hypertension (%)", x = "",
+       color = "Wealth Quintile") +
+  #ggtitle("Cascades by Wealth Quintile and Country Income Group") +
+  #theme_bw() +
+  theme_minimal() +
+  theme(aspect.ratio=40/40) +
+  #facet_grid(rows = vars(countryGDPclass), cols = vars(wealth_quintile)) +
+  facet_wrap(~countryGDPclass, nrow = 1, ncol = 3) +
+  theme(legend.position = "bottom",
+        panel.spacing.x = unit(3,"mm"),
+        axis.text.x = element_text(angle = -40, size = 10),
+        axis.text.y = element_text(size = 10),
+        strip.text.y = element_text(size = 12),
+        strip.text = element_text(size = 12)) +
+  scale_fill_manual(values = green) +
+  scale_color_manual(values = green) +
+  ylim(0,100)
+
+  ggsave("/Users/dorittalia/Desktop/Stephane HTN/Graphs/figure1-cascades-vars-Dec14.eps", width = 10, height = 5, dpi = 600)
+
+
+```
+
+
+# Figure 2
+
+```{r}
+
+difference <- readRDS("3 Output/difference-cvd-risk.rds") %>%
+  mutate(scenario = case_when(scenario == "Baseline" ~ "Baseline",
+                                scenario == "Scenario 1: Diagnosis" ~ "Diagnosis scenario",
+                                scenario == "Scenario 2: Treatment" ~ "Treatment scenario"))
+
+difference <- difference %>%
+  group_by(country) %>%
+  mutate(start = min(difference1_5),
+         stop = max(difference1_5))
+
+#difference$scenario <- factor(difference$scenario,
+#                                     levels = c("Scenario 2: Treatment", "Scenario 1: Diagnosis", "Baseline"),
+ #                                     labels= c("Treatment Scenario", "Diagnosis Scenario", "Baseline"))
+
+graph_cvd2 <- difference %>%
+  group_by(scenario) %>%
+  arrange(difference1_5) 
+
+oo <- graph_cvd2 %>%
+  #filter(scenario == "Scenario 2: Treatment")
+  filter(scenario == "Baseline")
+
+o <- unique(oo$country)
+
+#o1 <- graph_cvd2[(graph_cvd2$scenario == "Baseline"),] 
+                  #& graph_cvd2$wealth_quintile == "Q1"),]
+
+#graph_cvd2$country <- factor(graph_cvd2$country, levels = (o1$country))
+graph_cvd2$country <- factor(graph_cvd2$country, levels = (o))
+
+library(grid)
+library(ggpubr)
+text_high <- text_grob("\nHigher mean \nCVD risk in Q1", face = "italic", color="navy")
+text_low <- text_grob("\nHigher mean \nCVD risk in Q5", face = "italic" ,color="navy")
+text_mid <- text_grob("\nNo difference \nin CVD risk", face = "italic" ,color="navy")
+
+#pdf("/Users/dorittalia/Desktop/Stephane HTN/Graphs/country-mean-cvd-points.pdf", width = 12, height = 10)
+#test <- 
+#reorder(country, mean)
+ggplot(data = graph_cvd2, aes(x = difference1_5, 
+                              y = country,
+                              color = as.factor(scenario))) +
+  geom_vline(xintercept = 0, color = "grey50", linetype = "longdash") + 
+  geom_segment(aes(x=start ,xend=stop, y=country, yend=country, group = as.factor(scenario)), color="grey") +
+    geom_point(size=2.5) + 
+ geom_hline(yintercept = seq(1, length(graph_cvd2$country), by = 1), color="gray", size=.3, alpha=.1) + 
+  theme_classic() +
+  labs(x = "\n\n\nAbsolute (Percentage Point) Difference in Mean CVD Risk (Q1 - Q5)", color = "Scenario", y = "") +
+  theme(legend.position = "right",
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 11),
+        axis.title.x = element_text(size = 12),
+        legend.text = element_text(size = 12),
+        strip.text = element_text(size = 13),
+        legend.title = element_text(size = 14)) +
+annotation_custom(text_high,xmin=8,xmax=8,ymin=-2,ymax=-2) + 
+annotation_custom(text_low,xmin=-7.5,xmax=-7.5,ymin=-2,ymax=-2)+
+  annotation_custom(text_mid,xmin=0,xmax=-0,ymin=-2,ymax=-2)+
+coord_cartesian(clip="off")
+#+
+ #facet_wrap(~scenario) 
+ #facet_grid(rows = vars(scenario), cols = vars(wealth_quintile))
+
+ggsave("/Users/dorittalia/Desktop/Stephane HTN/Graphs/figure2-difference-q1-q5-v3.png", width = 12, height = 8)
+ggsave("/Users/dorittalia/Desktop/Stephane HTN/Graphs/figure2-difference-q1-q5-v3.svg", width = 12, height = 8)
+
+```
+
+# Figure 3
+
+
+```{r}
+
+ggplot(data = abs_diff_total4, aes(x = wealth_quintile, y = averted_rate, fill = wealth_quintile, group = scenario)) +
+  #geom_col(position = "dodge") +
+  geom_bar(stat = "identity", position = position_stack(reverse = TRUE)) +
+    geom_text(aes(label=round(averted_rate,1), nsmall = 1), vjust = 1.5, color = "white") +
+  facet_grid(cols = vars(countryGDPclass), rows = vars(scenario)) +
+  #facet_wrap(~scenario) +
+  #scale_fill_manual(values = green_blu) +
+  scale_fill_manual(values = blues) +
+  #theme_bw() +
+  theme_minimal() +
+  #scale_fill_manual(values = c("#E5A825", "#832543", "#3D6879")) +
+                    #,
+                  #  labels = c("Diagnosed, Controlled Hypertension",
+                   #            "Diagnosed, Uncontrolled Hypertension",
+                   #            "Undiagnosed Hypertension")) +
+  labs(x = "", y = "CVD cases averted per 1,000 people living with hypertension", fill = "Wealth Quintile") +
+  theme(legend.position = "none") +
+  #scale_y_continuous(labels = scales::percent) +
+  theme(axis.text.x = element_text(size = 13),
+        strip.text = element_text(size = 14)) 
+
+
+  ggsave("/Users/dorittalia/Desktop/Stephane HTN/Graphs/figure3-new-bars.eps", width = 10, height = 7)
+
+```
+
+# Figure 4
+
+
+```{r}
+
+ggplot(data = abs_diff_total3, aes(x = wealth_quintile, y = prop_cases*100, fill = wealth_quintile, group = scenario)) +
+  #geom_col(position = "dodge") +
+  geom_bar(stat = "identity", position = position_stack(reverse = TRUE)) +
+    geom_text(aes(label=format(round(prop_cases*100,digits=1), nsmall = 1)), vjust = 1.5, color = "white") +
+  facet_grid(cols = vars(countryGDPclass), rows = vars(scenario)) +
+  #facet_wrap(~scenario) +
+  #scale_fill_manual(values = purp_pink) +
+  scale_fill_manual(values = purple) +
+  #theme_bw() +
+  theme_minimal() +
+  #scale_fill_manual(values = c("#E5A825", "#832543", "#3D6879")) +
+                    #,
+                  #  labels = c("Diagnosed, Controlled Hypertension",
+                   #            "Diagnosed, Uncontrolled Hypertension",
+                   #            "Undiagnosed Hypertension")) +
+  labs(x = "", y = "Percent (%) of total CVD cases averted", fill = "Wealth Quintile") +
+  theme(legend.position = "none") +
+  #scale_y_continuous(labels = scales::percent) +
+  theme(axis.text.x = element_text(size = 13),
+        strip.text = element_text(size = 14)) 
+
+ggsave("/Users/dorittalia/Desktop/Stephane HTN/Graphs/total-prop-lmic-fig4-purp.eps", width = 10, height = 7, dpi = 600)
+```
+
+
+# Figure 5
+
+```{r}
+
+library(ggbeeswarm)
+ggplot(data = abs, 
+               aes(x = wealth_quintile, 
+                          y = mean,
+                   color = countryGDPclass)) +
+                   #color = country)) +
+                   #label = plot_label)) +
+  ggbeeswarm::geom_beeswarm(cex = 2, method = "square",corral = "wrap", coral.width = 1, alpha = 0.8) +
+  #geom_jitter(position=position_jitter(width=0.1), alpha = 0.7) +
+  #geom_text(position = position_jitter(seed = 1), size = 2) +
+  geom_smooth(aes(group = auc_gap_rank), fill="grey75", alpha=0.3, 
+              linetype="solid", color = "darkblue",
+              se=T, formula = y ~ x, method = "lm", size=0.5, fullrange=T) +
+              #method = "loess", 
+  scale_y_continuous(labels = comma) +
+  guides(color=guide_legend(title="Country income group")) +
+  labs(y = "Mean CVD Cases Averted per 1,000 People Living with Hypertension", x = "Weath Quintile") +
+ # theme_bw() +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        strip.text = element_text(size = 12),
+        axis.title.y = element_text(size=10)) +
+  facet_grid(cols = vars(auc_gap_rank), rows = vars(scenario)) +
+  ylim(0,55) +
+  scale_color_brewer(palette = "Dark2")
+
+ggsave("/Users/dorittalia/Desktop/Stephane HTN/Graphs/figure5-byauc-2.jpg", height =6, width=9,dpi = 600)
+
+```
+
+
+
+
+
+

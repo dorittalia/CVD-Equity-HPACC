@@ -1,0 +1,271 @@
+---
+title: "Scenario code - main analysis"
+author: "Dorit Stein"
+date: "1/17/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+rm(list = ls())
+
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(ggplot2)
+library(readxl)
+#library(astsa)
+#library(fuzzyjoin)
+#library(plm)
+#library(tidyverse)
+library(purrr)
+library(knitr)
+#library(haven)
+library(srvyr)
+library(survey)
+# library(globorisk)
+library(data.table)
+
+library(furrr)
+
+```
+
+
+###SCENARIOS
+
+
+```{r - input data}
+
+all <- readRDS(file = "/n/holyscratch01/verguet_lab/Everyone/all.rds") %>%
+  mutate(country = Country)
+
+# sensitivity - Nov 22
+#all <- readRDS(file = "/n/holyscratch01/verguet_lab/Everyone/all-sensitivity.rds") %>%
+#  mutate(country = Country)
+
+#all <- readRDS(file = "3 Output/all.rds") %>%
+#  mutate(country = Country)
+
+```
+
+# Scenario 1 + 2
+ - do all the sampling/treating/summarizing for one country-quintile (within one function)
+ - then map that function on the nested dataframe (can future_map)
+
+Scenario 1 - "Diagnosis scenario"
+
+```{r - new scenario coding - scenario1}
+all_s1 <- all %>%
+  filter(addl_aware_und > 0) %>%
+  filter(linkage > 0)
+# means do not need to sample any more to become aware (Mongolia Q3, target)
+# and/or on tx (Niger Q2, 0% linkage rate - 0 aware get to treated)
+#in scenario 1, outcomes are baseline outcomes for these country-quintiles (for both aware + tx in Mongolia; only tx in Niger)
+
+#nest by country-wealth_quintile so can run sampling on each dataframe for each country
+all_s1_nest <- all_s1 %>%
+  group_by(country, wealth_quintile) %>%
+  nest() %>%
+  ungroup()
+
+# alg is dataframe for 1 country-quintile
+
+scenario1 <- function(alg) { # input dataset should include aware/unaware, filter in the fxn below
+  
+  #set.seed(1234)
+  
+  prop_sample <- alg$addl_aware_und[1]
+  link_rx <- alg$linkage[1]
+  
+  # filter those unaware of hypertensive status
+  # sample from unaware to be put on treatment
+  alg1 <- alg %>%
+    filter(bpms_hypt != 1) %>% # filter unaware
+    slice_sample(prop = prop_sample) |>
+    slice_sample(prop = link_rx) |>
+    mutate(on_aware_tx = 1) %>%
+    select(ID, on_aware_tx)
+  
+  alg_RR <- alg %>% 
+    mutate(on_aware_tx = if_else(ID %in% alg1$ID, 1, 0)) |>
+    mutate(cvd_risk_s1 = ifelse(on_aware_tx == 1, cvd_risk*cvd_reduction, cvd_risk), 
+           # assign new CVD risk for those on tx
+           risk_d_s1 = cvd_risk-cvd_risk_s1,
+           # NEW for relative change estimate
+           rel_change_s1 = abs((cvd_risk_s1-cvd_risk)/cvd_risk)) 
+           # for each individual, take difference from scenario 1 risk and baseline risk
+   
+   #set survey weights
+   scenario1_alg <- alg_RR %>% 
+     as_survey_design(
+       stratum = stratum_num,
+       ids = c(psu_num),
+       weights = w_bp)
+   
+   #weighted mean of CVD risk in baseline and scenario 1
+   mean_risk_s1 <- scenario1_alg %>%
+     summarize(mean_cvd_risk_s1 = survey_mean(cvd_risk_s1),
+               mean_risk_d_s1 = survey_mean(risk_d_s1),
+               mean_rel_change_s1 = survey_mean(rel_change_s1))
+   
+   s1_rnorm <- with(mean_risk_s1,
+        tibble(mean_cvd_risk_s1_rnorm = rnorm(1000,mean_cvd_risk_s1, mean_cvd_risk_s1_se),
+               mean_risk_d_s1_rnorm = rnorm(1000, mean_risk_d_s1, mean_risk_d_s1_se),
+               mean_rel_change_s1_rnorm = rnorm(1000, mean_rel_change_s1, mean_rel_change_s1_se)))
+
+  s1_rnorm
+     
+}
+
+# replicate scenario 1 function
+
+replicate_s1 <- function(alg) {
+  
+  df <- replicate(n = 1000, scenario1(alg), simplify = F)
+  
+  df2 <- map_dfr(df, as.list) |>
+    # pull out mean and 95th UI 
+    pivot_longer(cols = mean_cvd_risk_s1_rnorm:mean_rel_change_s1_rnorm) |>
+    group_by(name) |> 
+    arrange(value) |> 
+    mutate(rank = rank(value, ties.method = 'first'),
+           mean = as.numeric(mean(value)),
+           interval = ifelse(rank == 25000, "lower", "upper")) |> 
+    filter(rank == 25000 | rank == 975000) |>
+    # interval = ifelse(rank == 25, "lower", "upper")) |> 
+    #filter(rank == 25 | rank == 975) |>
+    ungroup() |>
+    select(-rank) |>
+    pivot_wider(names_from = interval, values_from = value)
+    
+    
+    df2
+  
+}
+
+# map scenarios onto the nested dataframe for each country-quintile
+plan(multisession)
+system.time({
+s1 <- all_s1_nest |>
+  mutate(s1_output = future_map(data, 
+                         ~replicate_s1(.),
+                         .options = furrr_options(seed=123L),
+                         .progress = TRUE)) |>
+  select(-data)
+})
+
+saveRDS(s1, "/n/holyscratch01/verguet_lab/Everyone/s1-sensitivity-Nov2022.rds")
+
+```
+
+Scenario 2- "Treatment scenario"
+
+```{r - new scenario coding - scenario1}
+
+# Scenario 2 coding
+
+# remove best performing treatment country-quintile so don't have 0 prop for sampling
+# Q1 in Kazahkstan
+all_s2 <- all %>%
+  filter(addl_tx_untr > 0) %>%
+  filter(!(country == "Kazakhstan" & wealth_quintile== 4)) # manually filter out target of s2 - Kazakhstan Q4
+
+#nest into country-quintile dataframes
+all_s2_nest <- all_s2 %>%
+  group_by(country, wealth_quintile) %>%
+  nest() %>%
+  ungroup()
+
+# alg is dataframe for 1 country-quintile
+
+scenario2 <- function(alg) {
+  
+  #set.seed(1234)
+  
+  prop_sample <- alg$addl_tx_untr[1]
+  
+  # sample from untreated to be put on treatment
+  alg2 <- alg %>%
+    filter(bpms_hypt_med != 1) %>% # filter untreated only
+    slice_sample(prop = prop_sample) |>
+                 #, weight_by = w_bp) %>%
+    mutate(slice_tx = 1) %>%
+    select(ID, slice_tx)
+  
+  alg_RR_2 <- alg %>% 
+    mutate(slice_tx = if_else(ID %in% alg2$ID, 1, 0)) |>
+    mutate(cvd_risk_s2 = ifelse(slice_tx == 1, cvd_risk*cvd_reduction, cvd_risk),
+           # assign new CVD risk for those on tx
+           risk_d_s2 = cvd_risk-cvd_risk_s2,
+           # NEW for relative change estimate
+           rel_change_s2 = abs((cvd_risk_s2-cvd_risk)/cvd_risk)) 
+            # for each individual, take difference from scenario 2 risk and baseline risk
+   
+  #set survey weights
+   scenario2_alg <- alg_RR_2 %>%
+     as_survey_design(
+       stratum = stratum_num,
+       ids = c(psu_num),
+       weights = w_bp)
+  
+  #weighted mean of CVD risk in baseline and scenario 1
+   mean_risk_s2 <- scenario2_alg %>%
+     summarize(
+       mean_cvd_risk_s2 = survey_mean(cvd_risk_s2),
+       mean_risk_d_s2 = survey_mean(risk_d_s2),
+       mean_rel_change_s2 = survey_mean(rel_change_s2))
+  
+     s2_rnorm <- with(mean_risk_s2,
+        tibble(mean_cvd_risk_s2_rnorm = rnorm(1000,mean_cvd_risk_s2, mean_cvd_risk_s2_se),
+               mean_risk_d_s2_rnorm = rnorm(1000, mean_risk_d_s2, mean_risk_d_s2_se),
+               mean_rel_change_s2_rnorm = rnorm(1000, mean_rel_change_s2, mean_rel_change_s2_se)))
+
+  s2_rnorm
+  
+}
+
+# replicate scenario 1 function
+
+replicate_s2 <- function(alg) {
+  
+  df <- replicate(n = 1000, scenario2(alg), simplify = F)
+  
+  df2 <- # flatten list into tibbles
+    map_dfr(df, as.list) |>
+    # pull out mean and 95th UI 
+    pivot_longer(cols = mean_cvd_risk_s2_rnorm:mean_rel_change_s2_rnorm) |>
+    group_by(name) |> 
+    arrange(value) |> 
+    mutate(rank = rank(value, ties.method = 'first'),
+           mean = as.numeric(mean(value)),
+             interval = ifelse(rank == 25000, "lower", "upper")) |> 
+            filter(rank == 25000 | rank == 975000) |>
+           #interval = ifelse(rank == 25, "lower", "upper")) |> 
+    #filter(rank == 25 | rank == 975) |>
+    ungroup() |>
+    select(-rank) |>
+    pivot_wider(names_from = interval, values_from = value)
+  
+  
+  df2
+  
+}
+
+
+# map scenarios onto the nested dataframe for each country-quintile
+plan(multisession) 
+
+s2 <- all_s2_nest |>
+  mutate(s2_output = future_map(data, 
+                         ~replicate_s2(.),
+                         .options = furrr_options(seed=1234L),
+                         .progress = TRUE)) |>
+        select(-data)
+
+
+# save clean version
+saveRDS(s2, "/n/holyscratch01/verguet_lab/Everyone/s2-sensitivity-Nov2022.rds")
+
+
+```

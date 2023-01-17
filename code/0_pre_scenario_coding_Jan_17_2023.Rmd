@@ -1,0 +1,743 @@
+---
+title: "Pre-scenario coding"
+author: "Dorit Stein"
+date: "1/17/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+rm(list = ls())
+
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(ggplot2)
+library(readxl)
+library(astsa)
+library(fuzzyjoin)
+library(plm)
+library(tidyverse)
+library(purrr)
+library(knitr)
+library(haven)
+library(srvyr)
+library(survey)
+library(vroom)
+library(data.table)
+library(janitor)
+library(qdapRegex)
+
+library(globorisk)
+
+
+```
+
+1. Load cleaned data
+
+```{r data}
+
+data <- read_csv("1 Raw Data/cleaned_final.csv") # August 31, 2022
+
+```
+
+2. Select countries for analytical sample and clean other variables
+ - unique PSUs
+ - check missingness: Select countries for analysis with <35.5% missingness for wealth_quintile variable
+    (other high missing countries were already filtered out in data cleaning)
+ - drop missing wealth_quintile individuals (now have complete.case dataset)
+ - filter out implausible sbp values
+ - fix countryGDPclass
+
+```{r analytical sample}
+
+# Make sure psu_num really is unique within each country
+data <- data %>% 
+  mutate(psu_num = str_c(Country, psu, sep = "_"),
+         stratum_num = stratum)
+
+# drop countries with > 0.355 missingness for wealth_quintile
+# pct_na_wealth
+data2 <- data %>%
+  filter(pct_na_wealth < 0.355)
+
+# countries to include - 52 total
+countries <- unique(data2$Country)
+
+# clean year
+# drop missing wealth_quintile individuals (complete.cases dataset now)
+# filter out implausible sbp
+data3 <- data2 %>%
+  drop_na(wealth_quintile) %>% 
+  mutate(year = ifelse(year == "2015-2016", "2015",
+                ifelse(year == "2009-10", "2009",
+                ifelse(year == "2009-11", "2010", 
+                ifelse(year == "2009-12", "2011",
+                ifelse(year == "2014-15", "2014",
+                ifelse(year == "2005-6", "2005",
+                ifelse(year == "2007/8", "2007", year)))))))) %>%
+  rowid_to_column("ID") %>%
+  mutate(Country = case_when(Country == "Swaziland" ~ "Eswatini",
+                             TRUE ~ Country)) %>%
+  filter(sbp <= 270 & sbp >= 70) %>%
+  mutate(countryGDPclass = case_when(countryGDPclass == "Low Income Country" ~ "1",
+                                     countryGDPclass == "Lower-middle Income Country" ~ "2",
+                                     countryGDPclass == "Upper-middle Income Country" ~ "3",
+                                     TRUE ~ countryGDPclass))
+
+data3$countryGDPclass <- factor(data3$countryGDPclass,
+                            levels = c("1","2", "3"),
+                            labels = c("Low-income", "Lower-middle Income", "Upper-middle Income"))
+data3$wealth_quintile2 <- factor(data3$wealth_quintile,
+                                     levels = c("1", "2", "3", "4", "5"),
+                                     labels= c("Q1", "Q2", "Q3", "Q4", "Q5"))
+
+# Aug 29, 2022 (with htn/non-htns, complete.cases for relevant variables)
+saveRDS(data3, "3 Output/data.rds") 
+
+```
+
+3. Hypertension prevalence estimates (country, country-quintile level)
+ - using analytical sample with complete.cases for relevant variables
+ - by country, and by country-quintile
+ 
+```{r htn prevalence}
+
+data3 <- readRDS("3 Output/data.rds")
+
+# set survey design for hypertension prevalence estimates by country, and country-quintile
+data_htn <- data3 %>%
+  as_survey_design(
+    stratum = stratum_num,
+    ids = c(psu_num),
+    weights = w_bp)
+
+##weighted mean of hypertensives by country and country-quintile
+
+# by country
+htn <- data_htn %>%
+  group_by(Country) %>%
+  summarize(mean_htn = survey_mean(clin_hypt, vartype = "ci"))
+
+# save
+saveRDS(htn, file ="3 Output/htn-country.rds")
+
+# by country-quintile
+htn_quintile <- data_htn %>%
+  group_by(Country, wealth_quintile) %>%
+  summarize(
+    mean_htn = survey_mean(clin_hypt, vartype = "ci"))
+
+# save
+saveRDS(htn_quintile, file ="3 Output/htn-quintile.rds")
+
+# merge in htn prevalence data to main dataset
+data4 <- data3 %>%
+  left_join(htn)
+
+saveRDS(data4, "3 Output/data4.rds")
+
+```
+
+4. Weights for RRs from GBD (country/sex/age-group)
+ - get country/sex/age-group proportions of deaths from IHD vs CHD to weight RRs by, from GBD
+
+```{r GBD rr weights}
+
+# load GBD data
+# Accessed Monday January 10th 2022
+
+gbd <- read.csv("1 Raw Data/IHMD-GBD-CVD-Data-Jan.10.2022/IHME-GBD_2019_DATA-8de51a8d-1.csv")
+
+head(gbd)
+
+countries_gbd <- unique(gbd$location_name)
+
+measures <- unique(gbd$measure_name)
+
+causes <- unique(gbd$cause_name)
+
+cause_id <- unique(gbd$cause_id)
+
+# measures - incidence and death
+# metrics - number or percent
+# cause_name - 
+#[1] "Cardiovascular diseases"              "Rheumatic heart disease"              "Ischemic heart disease"              
+#[4] "Stroke"                               "Non-rheumatic valvular heart disease" "Cardiomyopathy and myocarditis"      
+#[7] "Hypertensive heart disease" 
+# cause_id - want 
+# stroke - 494
+# IHD - 493
+
+# get total sum of IHD and stroke deaths/incidence
+# get proportion IHD and stroke represent of total for each country-age-sex grouping
+gbd2 <- gbd %>%
+  filter(cause_id == 493 | cause_id == 494) %>%
+  filter(metric_name == "Number") %>%
+  filter(measure_name == "Deaths") %>%
+  filter(sex_id != 3) %>%
+  mutate(Country = location_name) %>%
+  group_by(Country, measure_name, sex_id, sex_name, age_id, age_name) %>%
+  mutate(total = sum(val)) %>%
+  ungroup() %>%
+  mutate(prop = val/total) %>%
+  group_by(Country, measure_name, sex_id, sex_name, age_id, age_name) %>%
+  mutate(sum_w = sum(prop)) %>%
+  ungroup()
+
+# pull out country names
+countries <- c(unique(data3$Country))
+
+# filter countries to get ratios of stroke vs IHD
+# make uppercase, rename some to match
+
+gbd3 <- gbd2 %>%
+  mutate(Country = case_when(Country == "Lao People's Democratic Republic" ~ "Laos",
+                             Country == "Iran (Islamic Republic of)" ~ "Iran",
+                             Country == "Republic of Moldova" ~ "Moldova",
+                             Country == "Saint Vincent and the Grenadines" ~ "St. Vincent & the Grenadines",
+                             Country == "United Republic of Tanzania" ~ "Tanzania",
+                             Country == "Timor-Leste" ~ "Timor Leste",
+                                  TRUE ~ Country),
+         sex = case_when(sex_id == 1 ~ 0,
+                         sex_id == 2 ~ 1,
+                         TRUE ~ NA_real_)) %>%
+  filter(Country %in% countries) %>%
+  select(sex, age_id, age_name, cause_name, -year, Country, prop) %>%
+  pivot_wider(values_from = prop, names_from = cause_name) %>%
+  rename(prop_ihd = "Ischemic heart disease",
+         prop_stroke = "Stroke")
+
+# see which countries matched in population dataset
+matched <- sort(c(unique(gbd3$Country)))
+
+# countries that did not match
+missing <- setdiff(countries, matched)
+#> missing
+#[1] "Gambia" Gambia                      
+# "Iran" Iran (Islamic Republic of)                        
+# "Laos"    Lao People's Democratic Republic                    
+#[4] "Moldova"            Republic of Moldova
+#"St. Vincent & the Grenadines" 
+#"Swaziland"  "Eswatini"                 
+#[7] "Tanzania"   United Republic of Tanzania
+#"Timor Leste"   Timor-Leste
+
+# save country-level RRs
+saveRDS(gbd3, file = "3 Output/gbd-chd-stroke.rds")
+
+```
+
+5. Calculate individual RRs (individual-level data)
+ - using Law et al equations
+ - using GBD weights from chunk above
+
+```{r RR calculations}
+
+data4 <- readRDS("3 Output/data4.rds")
+
+# calculate sbp change due to one med at standard dose from Law et al equation
+  # create 5 year age groups with same labels as GBD 5-year age groups to merge in CHD and Stroke proportion data
+  # assign RR for CHD and Stroke depending on 10 year age group from Law et al paper
+  # merge in country proportions
+  # generate weighted RR for each person if they were to be put on treatment (and apply to their CVD risk score later)
+
+data_sbp <- data4 %>%
+  mutate(sex = as.numeric(sex),
+         sbp_change = 9+(0.10*(sbp-154)),
+         age_id = case_when(age >=40 & age<45 ~ 13,
+                              age >=45 & age<50 ~ 14, 
+                              age >=50 & age<55 ~ 15, 
+                              age>=55 & age<60 ~ 16,
+                              age>=60 & age<65 ~ 17,
+                              age>=65 & age<70 ~ 18,
+                              age>=70 & age<75 ~ 19,
+                              age>=75 & age<80 ~ 20,
+                              age>=80 & age<85 ~ 30,
+                              age>=85 & age <90 ~ 31,
+                           TRUE ~ NA_real_),
+         rr_chd = case_when(age_id == 13 | age_id == 14 ~ 0.49,
+                            age_id == 15 | age_id == 16 ~ 0.5,
+                            age_id == 17 | age_id == 18 ~ 0.54,
+                            age_id == 19 | age_id == 20 ~ 0.6,
+                            age_id == 30 | age_id == 31 ~ 0.67,
+                                        TRUE ~ NA_real_),
+         rr_stroke = case_when(age_id == 13 | age_id == 14 ~ 0.36,
+                               age_id == 15 | age_id == 16 ~ 0.38,
+                               age_id == 17 | age_id == 18 ~ 0.43,
+                               age_id == 19 | age_id == 20 ~ 0.5,
+                               age_id == 30 | age_id == 31 ~ 0.67,
+                                        TRUE ~ NA_real_),
+         rr_chd_adj = rr_chd^(sbp_change/20),
+         rr_stroke_adj = rr_stroke^(sbp_change/20)) 
+
+# load GBD data for proportions of deaths due to CHD and Stroke for each country-sex-age group
+# from chunk above
+gbd3 <- readRDS(file = "3 Output/gbd-chd-stroke.rds")
+
+data_gbd <- data_sbp %>% 
+  left_join(gbd3)
+
+# calculate composite adjusted RR for each person
+data_cvd_rr <- data_gbd %>%
+  mutate(rr_w = (rr_chd_adj*prop_ihd)+(rr_stroke_adj*prop_stroke),
+         cvd_reduction = rr_w)
+
+# save
+saveRDS(data_cvd_rr, file = "3 Output/all-w-RRs.rds")
+
+```
+
+6. Globorisk
+ - individual CVD risk calculations
+
+```{r globorisk}
+
+data_cvd_rr <- readRDS("3 Output/all-w-RRs.rds")
+
+#run dataset into globorisk to get 10-year CVD risk for each person (line) in the dataset
+data_cvd <- data_cvd_rr %>%
+  mutate(cvd_risk = globorisk::globorisk(
+  sex = sex,
+  age = age,
+  sbp = sbp,
+  smk = csmoke,
+  bmi = bmi,
+  iso = ccodes,
+  year = year, 
+  version = "office",
+  type = "risk")
+) 
+
+#save 
+saveRDS(data_cvd, file= "3 Output/analysis-w-cvd.rds")
+
+```
+
+# AMONG HYPERTENSIVES ONLY
+
+7. Cascade performance summary 
+ - summarize cascade for each country-quintile
+ - select "best performers" at each step (create column in dataset with best performer value?)
+ - AUC gap calculations
+
+```{r cascades}
+
+data_cvd <- readRDS(file= "3 Output/analysis-w-cvd.rds") %>%
+  filter(clin_hypt == 1)
+
+saveRDS(data_cvd, "3 Output/all-w-RRs.rds") # use this in next chunk
+
+gdp <- data_cvd %>%
+  group_by(Country) %>%
+  summarize(countryGDPclass = unique(countryGDPclass))
+
+# missing cascade variables?
+data_missing <- data_cvd %>%
+  group_by(Country) %>%
+  mutate(n = n()) %>%
+  summarize(across(.cols = c(p_id, 
+                             psu_num, 
+                             stratum_num, 
+                             bpms_hypt,
+                            bpms_hypt_med,
+                            bpms_hypt_med_ctl, 
+                            wealth_quintile),
+                list(~sum(is.na(.)),
+                ~n()))) 
+# Armenia missing stratum information (Aug 30)
+
+# set survey weight parameters
+# with survey package
+data5 <- data_cvd %>%
+  as_survey_design(
+    stratum = stratum_num, 
+    ids = c(psu_num), 
+    weights = w_bp,
+    variables = c(
+      Country,
+      clin_hypt,
+      bpms_hypt,
+      bpms_hypt_med,
+      bpms_hypt_med_ctl,
+      wealth_quintile
+    )
+  )
+
+# Overall
+# get weighted proportions 
+  # out of whole dataset of hypertensives, get proportion that are each variable/step in the cascade
+
+data_n <- data5 %>%
+  group_by(Country) %>%
+  summarize(n_htns = survey_total(clin_hypt, vartype = "ci"),
+            prop_aware = survey_mean(bpms_hypt, proportion = T, vartype = "ci"),
+            prop_tx = survey_mean(bpms_hypt_med, proportion = T, vartype = "ci"),
+            prop_control = survey_mean(bpms_hypt_med_ctl, proportion = T, vartype = "ci")) %>%
+  mutate_at(vars(prop_aware:prop_control_upp), ~(round((. * 100),2)))
+
+# By Quintile
+# summarize cascade proportions with weights
+data_q <- data5 %>%
+  group_by(Country, wealth_quintile) %>%
+  summarize(n_htns = survey_total(clin_hypt, vartype = "ci"),
+            prop_aware = survey_mean(bpms_hypt, proportion = T, vartype = "ci"),
+            prop_tx = survey_mean(bpms_hypt_med, proportion = T, vartype = "ci"),
+            prop_control = survey_mean(bpms_hypt_med_ctl, proportion = T, vartype = "ci")) %>%
+  mutate_at(vars(prop_aware:prop_control_upp), ~(round((. * 100),2)))
+
+# by quintile linkage rate (from aware to treated,ie slope of line from aware to treated)
+data_q <- data_q %>%
+  mutate(linkage = prop_tx/prop_aware)
+
+#cascade_q_data2$cascade_variable <- factor(cascade_q_data$cascade_variable, 
+#                                          levels = c("prop_aware", "prop_tx", "prop_control"))
+
+saveRDS(data_n, file = "3 Output/overall_cascades.rds")
+saveRDS(data_q, file = "3 Output/quintile_cascades.rds")
+
+
+## r Shape data for ggplot
+# load cascades by quintiles graphs
+
+data_q <- readRDS("3 Output/quintile_cascades.rds")
+
+#get data into long format for ggplot
+cascade_q_data <- data_q %>%
+  select(Country, wealth_quintile, 
+         prop_aware, 
+         prop_tx,  
+        prop_control) %>%
+  pivot_longer(prop_aware:prop_control, names_to = "cascade_variable") 
+
+#shape lower bound to merge back in
+lower <- data_q %>%
+  select(Country, wealth_quintile, 
+         prop_aware_low, 
+         prop_tx_low,
+         prop_control_low) %>%
+  pivot_longer(prop_aware_low:prop_control_low, names_to = "cascade_variable") %>%
+  mutate(cascade_variable = case_when(cascade_variable == "prop_aware_low"  ~ "prop_aware",
+                                      cascade_variable == "prop_tx_low"  ~ "prop_tx",
+                                      cascade_variable == "prop_control_low" ~ "prop_control",
+                                      TRUE ~ cascade_variable)) %>%
+  select(Country, wealth_quintile,cascade_variable,
+         lower = value)
+
+#shape upper bound to merge back in
+upper <- data_q %>%
+  select(Country, wealth_quintile, 
+         prop_aware_upp, 
+         prop_tx_upp,
+         prop_control_upp) %>%
+  pivot_longer(prop_aware_upp:prop_control_upp, names_to = "cascade_variable") %>%
+  mutate(cascade_variable = case_when(cascade_variable == "prop_aware_upp"  ~ "prop_aware",
+                                      cascade_variable == "prop_tx_upp"  ~ "prop_tx",
+                                      cascade_variable == "prop_control_upp" ~ "prop_control",
+                                      TRUE ~ cascade_variable)) %>%
+  select(Country, wealth_quintile,cascade_variable,
+         upper = value)
+
+#join so have column with cascade variable names in each row and the upper and lower bound values next to it for ggplot format
+cascade_q_data2 <- cascade_q_data %>% left_join(lower) %>% left_join(upper)
+
+#factor cascade levels
+cascade_q_data2$cascade_variable <- factor(cascade_q_data$cascade_variable, 
+                                          levels = c("prop_aware", "prop_tx", "prop_control"))
+cascade_q_data2$wealth_quintile <- as.factor(cascade_q_data$wealth_quintile)
+
+cascade_q_data2 <- cascade_q_data2 %>% 
+  left_join(gdp)
+
+#cascade_q_data2$countryGDPclass <- factor(cascade_q_data2$countryGDPclass,
+#                            levels = c("1","2", "3"),
+#                            labels = c("Low-income", "Lower-middle Income", "Upper-middle Income"))
+
+saveRDS(cascade_q_data2, "3 Output/cascade-graph.rds")
+
+#####Identify best performers#####
+#best at each step (irrespective of quintile)
+best_step <- cascade_q_data2 %>%
+  group_by(cascade_variable) %>%
+  filter(value == max(value, na.rm=TRUE))
+
+saveRDS(best_step, file = "3 Output/best_step.rds")
+
+best_step_quintile <-  cascade_q_data2 %>%
+  group_by(cascade_variable, wealth_quintile) %>%
+  filter(value == max(value, na.rm=TRUE))
+
+saveRDS(best_step_quintile, file = "3 Output/best-step-quintile.rds")
+
+####area under curves####
+
+area <- data_q %>%
+  group_by(Country, wealth_quintile) %>%
+  summarize(area1 = (prop_aware+prop_tx)/2,
+            area2 = (prop_tx+prop_control)/2,
+            area_sum = area1 + area2) 
+
+saveRDS(area, file = "3 Output/area-under-quintile-cascades.rds")
+
+best_area <- area %>%
+  group_by(wealth_quintile) %>%
+  filter(area_sum == max(area_sum, na.rm = T))
+
+saveRDS(best_area, file = "3 Output/best-area-under-quintile-cascades.rds")
+
+```
+
+
+8. Scenario data file prep
+ - keep only hypertensives
+ - merge in country-level data: (or keep in separate country/country-quintile dataset?)
+    - htn prevalence, auc_gap, countryGDPclass, cascade values
+ - set cascade targets by country-quintile and scenario
+ - generate baseline cascade performance gap measures/tertiles for graphing stratification
+ - join cascade targets and main dataset 
+ - select relevant columns
+ 
+ 
+```{r}
+
+# load Chunk 2 output w/ CVD risk and RR estimates
+data_cvd_rr <- readRDS(file = "3 Output/all-w-RRs.rds")
+# most recent saved dataset of only htns
+
+#####SETTING CASCADE TARGETS####
+
+# merge in country-level cascade information by quintile in order to estimate additional proportion of individuals who need to be aware and/or treated in each scenario
+# will merge this into main dataset
+
+data_q <- readRDS(file = "3 Output/quintile_cascades.rds")
+
+cascades <- data_q %>%
+  mutate(prop_aware = as.numeric(prop_aware),
+         prop_tx = as.numeric(prop_tx))
+rm(data_q)
+
+# figure out target proportion for each country - ie how many of the UNDIAGNOSED hypertensives need to be sample for each country
+# load(file = "3 Output/best-step-quintile.rda")
+best_step <- readRDS(file = "3 Output/best_step.rds")
+
+# best proportion AWARE
+  # 79.85% in Mongolia Q3
+aware <- best_step %>%
+  filter(cascade_variable == "prop_aware") %>%
+  select(value)
+
+#best proportion on TREATMENT
+  #70.85% - Q4 in Kazakhstan
+tx <- best_step %>%
+  filter(cascade_variable == "prop_tx") %>%
+  select(value)
+
+#"proportions" are in percents in cascade summary
+# input as proportions for sampling
+aware_target <- 0.7985
+
+tx_target <- 0.7085
+
+# in percents
+# calculate additional people aware and/or on tx in each scenario for each country-quintile
+# calculate proportion difference/number of additional people required to be sampled (ie made aware or on tx) in each group (ie country, quintile) to reach targets specified above
+cascades2 <- cascades %>%
+ # rename(country = Country) %>%
+  mutate(across(prop_aware:prop_control_upp, ~./100)) %>% # get into proportions (not percents)
+  mutate(addl_aware_prop = aware_target-prop_aware, #additional proportion of htn that need to be identified to reach target (target proportion minus proportion aware)
+         addl_aware_und = (addl_aware_prop/(1-prop_aware)), #proportion of the undiagnosed that need to be sampled (ratio)
+          addl_tx_prop = tx_target-prop_tx, #additional proportion of htn on tx (target tx prop minus current tx prop)
+         addl_tx_untr = (addl_tx_prop/(1-prop_tx))) #additional treatment proportion needed divided by the untreated population to get proportion of untreated need to sample from
+
+#join hypertensives with cascade target country-quintile information
+country_cascades <- left_join(data_cvd_rr, cascades2) # join cascade target info (prop_aware, prop_tx needed for scenarios)
+
+# treatment gap
+cascades3<- cascades2 %>%
+  group_by(Country) %>%
+  filter(wealth_quintile == 1 | wealth_quintile == 5) %>%
+  pivot_wider(id_cols = c(Country), names_from = wealth_quintile, values_from = prop_tx) %>%
+  rename(Q1 = `1`, Q5 = `5`) %>%
+  mutate(tx_gap = Q5-Q1) %>%
+  ungroup() %>%
+  within(tx_gap_rank <- as.integer(cut(tx_gap, quantile(tx_gap, probs=0:3/3), include.lowest=TRUE))) 
+
+saveRDS(cascades3, file = "3 Output/cascades3.rds")
+
+# area under curve gap calculations
+area <- readRDS(file = "3 Output/area-under-quintile-cascades.rds")
+
+area2 <- area %>%
+  group_by(Country) %>%
+  filter(wealth_quintile == 1 | wealth_quintile == 5) %>%
+  pivot_wider(id_cols = c(Country), names_from = wealth_quintile, values_from = area_sum) %>%
+  rename(Q1 = `1`, Q5 = `5`) %>%
+  mutate(auc_gap = Q5-Q1) %>%
+  ungroup() %>%
+  within(auc_gap_rank <- as.integer(cut(auc_gap, quantile(auc_gap, probs=0:3/3), include.lowest=TRUE))) %>%
+  select(Country, auc_gap_rank)
+
+saveRDS(area2, file = "3 Output/area2.rds")
+
+#join hypertensives with cascade target country-quintile information
+country_cascades <- left_join(data_cvd_rr, cascades2) %>% # join cascade target info (prop_aware, prop_tx needed for scenarios)
+  left_join(cascades3) %>% # join in tx_gap info
+  left_join(area2) # join in cascade perf gap info
+
+#dataframe with selected columns for scenario runs
+all <- country_cascades %>%
+  select(ID,
+         Country,
+         countryGDPclass, 
+         psu_num, 
+         rural, 
+         stratum_num, 
+         w_bp, 
+         year, 
+         age, 
+         educat, 
+         sex, 
+         wealth_quintile,
+         bp_med, 
+         clin_hypt,
+         sbp,
+         und_hypt, 
+         bpms_hypt, 
+         bpms_hypt_med,
+         bpms_hypt_med_ctl,
+         bmi,
+         csmoke,
+         ccodes,
+         cvd_reduction,
+         cvd_risk:addl_tx_untr,
+         tx_gap:auc_gap_rank,
+         mean_htn)
+
+saveRDS(all, file = "3 Output/all.rds")
+
+```
+
+8a sensitivity analysis target calculation
+ 
+```{r scenario data prep}
+
+# load Chunk 2 output w/ CVD risk and RR estimates
+data_cvd_rr <- readRDS(file = "3 Output/all-w-RRs.rds")
+# most recent saved dataset of only htns
+
+#####SETTING CASCADE TARGETS####
+
+# merge in country-level cascade information by quintile in order to estimate additional proportion of individuals who need to be aware and/or treated in each scenario
+# will merge this into main dataset
+
+data_q <- readRDS(file = "3 Output/quintile_cascades.rds")
+
+cascades <- data_q %>%
+  mutate(prop_aware = as.numeric(prop_aware),
+         prop_tx = as.numeric(prop_tx))
+rm(data_q)
+
+# ID best performing quintile in each country for sensitivity analysis targets
+target <- cascades %>%
+  group_by(Country) %>%
+  mutate(top_aware = rank(-prop_aware),
+         top_tx = rank(-prop_tx)) 
+# scenario 1 - aware
+target_aware<- target %>%
+  filter(top_aware == 1) %>%
+  select(Country, 
+         prop_aware_target = prop_aware, 
+         top_aware) %>%
+  distinct()
+
+# scenario 2 - tx
+target_tx <- target %>%
+  filter(top_tx == 1) %>%
+  select(Country, 
+         prop_tx_target = prop_tx, 
+         top_tx) %>%
+  distinct()
+
+
+# country specific targets for sensitivity analysis
+targets <- left_join(target_aware, target_tx) %>%
+  select(-top_aware, -top_tx) %>%
+  left_join(cascades) %>%
+  mutate(prop_aware_target = prop_aware_target/100,
+         prop_tx_target = prop_tx_target/100)
+
+# in percents
+# calculate additional people aware and/or on tx in each scenario for each country-quintile
+# calculate proportion difference/number of additional people required to be sampled (ie made aware or on tx) in each group (ie country, quintile) to reach targets specified above
+targets2 <- targets %>%
+ # rename(country = Country) %>%
+  mutate(across(prop_aware:prop_control_upp, ~./100)) %>% # get into proportions (not percents)
+  mutate(addl_aware_prop = prop_aware_target-prop_aware, #additional proportion of htn that need to be identified to reach target (target proportion minus proportion aware)
+         addl_aware_und = (addl_aware_prop/(1-prop_aware)), #proportion of the undiagnosed that need to be sampled (ratio)
+          addl_tx_prop = prop_tx_target-prop_tx, #additional proportion of htn on tx (target tx prop minus current tx prop)
+         addl_tx_untr = (addl_tx_prop/(1-prop_tx))) #additional treatment proportion needed divided by the untreated population to get proportion of untreated need to sample from
+
+#join hypertensives with cascade target country-quintile information
+country_cascades_sens <- left_join(data_cvd_rr, targets2) # join cascade target info (prop_aware, prop_tx needed for scenarios)
+
+
+#dataframe with selected columns for scenario runs
+all <- country_cascades_sens %>%
+  select(ID,
+         Country,
+         countryGDPclass, 
+         psu_num, 
+         rural, 
+         stratum_num, 
+         w_bp, 
+         year, 
+         age, 
+         educat, 
+         sex, 
+         wealth_quintile,
+         bp_med, 
+         clin_hypt,
+         sbp,
+         und_hypt, 
+         bpms_hypt, 
+         bpms_hypt_med,
+         bpms_hypt_med_ctl,
+         bmi,
+         csmoke,
+         ccodes,
+         cvd_reduction,
+         cvd_risk:addl_tx_untr,
+         mean_htn)
+
+saveRDS(all, file = "3 Output/all-sensitivity.rds")
+
+```
+
+9. Baseline CVD risk calculations
+
+```{r baseline cvd risk}
+# start with data_cvd_rr dataset
+# full dataset (of hypertensives) with RRs (won't use for baseline calculation though)
+
+#data_cvd <- readRDS(file= "3 Output/analysis-w-cvd.rds")
+all <- readRDS("3 Output/all.rds")
+
+# set survey design
+baseline <- all %>%
+  as_survey_design(
+    stratum = stratum_num,
+    ids = c(psu_num),
+    weights = w_bp)
+
+#weighted mean of CVD risk in baseline
+mean_risk_b <- baseline %>%
+  group_by(Country, wealth_quintile) %>%
+  summarize(mean_cvd_risk_b = survey_mean(cvd_risk, vartype = "ci"))
+
+saveRDS(mean_risk_b, "3 Output/baseline-calcs.rds")
+
+baseline_risk <- readRDS("3 Output/baseline-calcs.rds")
+  
+```
+
