@@ -1,0 +1,858 @@
+---
+title: 'Supplementary Webappendix 2: Tables and Figures'
+subtitle: 'Improving hypertension care cascades and cardiovascular disease inequities in low- and middle-income countries:'
+author: 'findings from a modelling study based on nationally representative surveys from 52 countries'
+date: ''
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 2
+    number_sections: no
+    keep_tex: yes
+  word_document:
+    toc: yes
+    toc_depth: '2'
+latex_engine: pdflatex
+classoption: landscape
+header-includes: \usepackage{helvet} \renewcommand\familydefault{\sfdefault}
+include-before: '`\newpage{}`{=latex}'
+---
+
+```{r include = F, echo = FALSE, message = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+
+rm(list = ls())
+
+library(tidyverse)
+library(ggrepel)
+library(astsa)
+library(fuzzyjoin)
+library(purrr)
+library(knitr)
+#library(rmarkdown)
+library(srvyr)
+library(scales)
+library(survey)
+#library(globorisk)
+library(data.table)
+library(countrycode) # turn country codes into pretty names
+library(gridExtra)   # a helper for arranging individual ggplot objects
+library(ggthemes)    # has a clean theme for ggplot2
+library(viridis)     # best. color. palette. evar.
+library(knitr)       # kable : prettier data.frame output
+## tableone package itself
+library(tableone)
+
+library(kableExtra)
+
+options(kableExtra.auto_format = FALSE)
+options(knitr.table.format = "latex")
+
+library(iNZightTools) # for survey_IQR
+
+library(paletteer)
+library(data.table)
+library(grattan)
+
+```
+
+```{r include = F, echo = FALSE, message = FALSE}
+
+cascades <- readRDS("3 Output/cascade-graph.rds")
+
+# to load into appendix file later
+abs <- readRDS("3 Output/abs.rds")
+rel <- readRDS("3 Output/rel.rds")
+mean_risk <- readRDS("3 Output/mean_risk.rds")
+
+# gap
+gap <- readRDS("3 Output/area2.rds") %>% rename(country = Country)
+
+# Marissa data
+
+
+```
+
+\newpage
+
+## Table S1. Countries included in the analysis
+
+-   Countries included in the analysis and corresponding World Bank country-level income grouping[^1]
+
+[^1]: <https://datahelpdesk.worldbank.org/knowledgebase/articles/906519-world-bank-country-and-lending-groups>
+
+```{r echo = FALSE}
+
+countries <- cascades %>%
+  select(Country, countryGDPclass) %>%
+  unique() %>%
+  rename('World Bank Income Group' = countryGDPclass)
+
+#kbl(countries, caption = "Countries included in the analysis", booktabs = T) %>% 
+#  kable_styling(latex_options = c("striped", "hold_position")) 
+
+kbl(countries,
+    booktabs = TRUE,
+    longtable = TRUE) %>%
+  kable_styling(
+      position = "left",
+      latex_options = c("striped", "repeat_header"),
+      stripe_color = "gray!15")
+
+
+
+
+```
+
+\newpage
+
+## Table S2. Baseline Hypertension Care Cascade Performance by Country and Wealth Quintile
+
+-   Mean (95% confidence interval) Percent of People Living with Hypertension that are Aware, Treated, and Controlled by Country and Wealth Quintile
+
+
+```{r echo = FALSE, include = FALSE}
+
+cascades$cascade_variable <- factor(cascades$cascade_variable,
+                                        levels = c("prop_aware","prop_tx", "prop_control"),
+                                        labels = c("Aware", "Treated", "Controlled"))
+
+cascades$wealth_quintile <- factor(cascades$wealth_quintile,
+                                     levels = c("1", "2", "3", "4", "5"),
+                                      labels= c("Q1", "Q2", "Q3", "Q4", "Q5"))
+
+cascade_table <- cascades %>% 
+  arrange(Country, wealth_quintile) %>%
+  mutate(across(c(value, lower, upper), ~round(.,1))) %>%
+  ungroup() %>%
+  mutate(bounds = ifelse(is.na(lower), value, paste0(value, " ", "(", lower, ",", upper, ")"))) %>%
+  dplyr::select(Country = Country, 
+         'Cascade Step' = cascade_variable, 
+         "Wealth Quintile" = wealth_quintile, 
+         "Percent of People Living with Hypertension (95% CI)" = bounds)
+
+cascade_table2 <- cascade_table %>%
+  pivot_wider(names_from = "Wealth Quintile", values_from = c("Percent of People Living with Hypertension (95% CI)"))
+
+saveRDS(cascade_table2, "3 Output/cascade-table.rds")
+
+
+```
+
+```{r echo  = FALSE}
+
+
+cascade_table2 <- readRDS("3 Output/cascade-table.rds")
+
+
+kbl(cascade_table2,
+    booktabs = TRUE,
+    longtable = TRUE) %>%
+  kable_styling(position = "left",
+      latex_options = c("striped", "repeat_header")) %>%
+  footnote(general_title = "Note.", 
+           footnote_as_chunk = TRUE,
+           threeparttable = TRUE,
+           general = "'Aware' refers to the proportion of people living with hypertension who are aware of their diagnosis. 'Treated' refers to the proportion of people living with hypertension who reported being on treatment for hypertension. 'Controlled' refers to the proportion of people living with hypertension who have controlled blood pressure.")
+
+```
+
+
+\newpage
+
+
+## Table S3. Mean (95% Confidence/Uncertainty Interval) 10-year CVD risk by Country and Wealth Quintile in Baseline, Diagnosis, and Treatment Scenarios
+
+```{r echo = FALSE, include = FALSE}
+
+mean_risk$scenario <- factor(mean_risk$scenario,
+                                     levels = c("Baseline", "Scenario 1: Diagnosis", "Scenario 2: Treatment"),
+                             labels = c("Baseline", "Diagnosis", "Treatment"))
+
+cvd_table <- mean_risk %>% 
+  arrange(country, scenario, wealth_quintile) %>%
+  mutate(across(c(mean, lower, upper), ~round(.,1))) %>%
+  ungroup() %>%
+  mutate(bounds = ifelse(is.na(lower), mean, paste0(mean, " ", "(", lower, ",", upper, ")"))) %>%
+  dplyr::select(Country = country, 
+         Scenario = scenario, 
+         "Wealth Quintile" = wealth_quintile, 
+         "Mean 10-year CVD Risk (%) (95% UI)" = bounds)
+
+cvd_table2 <- cvd_table %>%
+  pivot_wider(names_from = "Wealth Quintile", values_from = c("Mean 10-year CVD Risk (%) (95% UI)"))
+
+saveRDS(cvd_table2, file = "3 Output/cvd_table2.rds")
+
+```
+
+```{r echo = FALSE}
+
+cvd_table2 <- readRDS("3 Output/cvd_table2.rds")
+
+#kbl(cvd_table2, caption = "Mean (95% uncertainty interval) 10-year CVD risk at Baseline, Scenario 1, and Scenario 2 by Country and Wealth Quintile", booktabs = T) %>% 
+#  kable_styling(latex_options = c("striped", "hold_position")) 
+
+kbl(cvd_table2,
+    booktabs = TRUE,
+    longtable = TRUE) %>%
+  kable_styling(position = "left",
+      latex_options = c("striped", "repeat_header"),
+      stripe_color = "gray!15") %>%
+   footnote(general_title = "Note.", 
+           footnote_as_chunk = TRUE,
+           threeparttable = TRUE,
+           general = "Baseline scenario used the observed survey data for each country and wealth quintile. 'Diagnosis' scenario improved awareness to 79.8% of people living with hypertension being aware of their status across countries and wealth quintiles, and used country and quintile specific linkage to treatment rates at baseline to estimate individuals initiated on treatment. 'Treatment' scenario improved treatment coverage to 70.8% across countries and wealth quintiles. Baseline estimates are reported using 95% confidence intervals. Diagnosis and Treatment scenarios are reported using 95% uncertainty intervals.")
+```
+
+\newpage
+
+## Figure S1. Mean Relative Decline (%) in CVD Risk Compared to Baseline by Country Income Group, Wealth Quintile, and Scenario
+
+```{r echo = FALSE, fig.dim = c(10, 6)}
+
+rel$scenario <- factor(rel$scenario,
+                                     levels = c("Baseline", "Scenario 1: Diagnosis", "Scenario 2: Treatment"),
+                             labels = c("Baseline", "Diagnosis scenario", "Treatment scenario"))
+
+ggplot(data = rel, 
+               aes(x = wealth_quintile, 
+                          y = mean,
+                   color = country)) +
+                   #label = plot_label)) +
+  geom_jitter(position=position_jitter(width=0.1), alpha = 0.5) +
+  #geom_text(position = position_jitter(seed = 1), size = 2) +
+  geom_smooth(aes(group = countryGDPclass), fill="grey75", alpha=0.5, 
+              linetype="solid", color = "maroon",
+              se=F, formula = y ~ x, method = "lm", linewidth=0.5, fullrange=T) +
+              #method = "loess", 
+  scale_y_continuous(labels = comma) +
+  guides(fill=guide_legend(title="Wealth Quintile")) +
+  labs(y = "Mean Relative Decline (%) in CVD Risk Compared to Baseline", x = "Weath Quintile",
+       caption = "Note: Dots represent a country-quintile and are color-coded by country.") +
+  theme_classic() +
+  theme(legend.position = "",
+        strip.text = element_text(face = "bold", size = 12)) +
+  facet_grid(cols = vars(countryGDPclass), rows = vars(scenario))
+
+
+```
+
+\newpage
+
+## Figure S2. Mean Relative Decline (%) in CVD Risk Compared to Baseline by Baseline Q1-Q5 Performance Gap Terciles, Wealth Quintile, and Scenario
+
+```{r echo = FALSE, fig.dim = c(10, 6)}
+
+ggplot(data = rel, 
+               aes(x = wealth_quintile, 
+                          y = mean,
+                   color = country)) +
+                   #label = plot_label)) +
+  geom_jitter(position=position_jitter(width=0.1), alpha = 0.5) +
+  #geom_text(position = position_jitter(seed = 1), size = 2) +
+  geom_smooth(aes(group = auc_gap_rank), fill="grey75", alpha=0.5, 
+              linetype="solid", color = "maroon",
+              se=F, formula = y ~ x, method = "lm", linewidth=0.5, fullrange=T) +
+              #method = "loess", 
+  scale_y_continuous(labels = comma) +
+  guides(fill=guide_legend(title="Wealth Quintile")) +
+  labs(y = "Mean Relative Decline (%) in CVD Risk Compared to Baseline", x = "Weath Quintile",
+       caption = "Note: Dots represent a country-quintile and are color-coded by country.") +
+  theme_classic() +
+  theme(legend.position = "",
+        strip.text = element_text(face = "bold", size = 12)) +
+  facet_grid(cols = vars(auc_gap_rank), rows = vars(scenario)) 
+
+
+
+```
+
+\newpage
+
+## Figure S3. Mean Difference in CVD Cases per 1,000 People Living with Hyperntesion compared to Baseline by Baseline Q1-Q5 Performance Gap Terciles, Wealth Quintile, and Scenario
+
+```{r echo = FALSE, fig.dim = c(10, 6)}
+
+#abs$scenario <- factor(abs$scenario,
+#                                     levels = c("Baseline", "Scenario 1: Diagnosis", "Scenario 2: Treatment"),
+#                             labels = c("Baseline", "Diagnosis scenario", "Treatment scenario"))
+
+ggplot(data = abs, 
+               aes(x = wealth_quintile, 
+                          y = mean,
+                   color = country)) +
+                   #label = plot_label)) +
+  geom_jitter(position=position_jitter(width=0.1), alpha = 0.5) +
+  #geom_text(position = position_jitter(seed = 1), size = 2) +
+  geom_smooth(aes(group = auc_gap_rank), fill="grey75", alpha=0.5, 
+              linetype="solid", color = "maroon",
+              se=F, formula = y ~ x, method = "lm", linewidth=0.5, fullrange=T) +
+              #method = "loess", 
+  scale_y_continuous(labels = comma) +
+  guides(fill=guide_legend(title="Wealth Quintile")) +
+  labs(y = "Mean Difference in CVD Cases per 1,000 People Living with Hypertension", x = "Weath Quintile",
+       caption = "Note: Dots represent a country-quintile and are color-coded by country.") +
+  theme_classic() +
+  theme(legend.position = "",
+        strip.text = element_text(face = "bold", size = 12)) +
+  facet_grid(cols = vars(auc_gap_rank), rows = vars(scenario)) 
+
+```
+
+\newpage
+
+## Figure S4. Mean proportion of people living with hypertension aware of their diagnosis, on treatment, and with controlled blood pressure by education category across low-income, lower-middle income, and upper-middle income country groups
+
+```{r echo = F, fig.dim = c(10, 6)}
+cascade_edu_long <- fread("figure1_education_data.csv")
+
+cascade_edu_long$educat <- factor(cascade_edu_long$educat,
+                       levels = c("No formal schooling", "Less than primary school", "Primary school completed", "Some high school", "High school or above"))
+cascade_edu_long$variable <- factor(cascade_edu_long$variable, 
+                                    levels = c("mean_htn", "mean_aware", "mean_treated", "mean_controlled"))
+
+ggplot(data = cascade_edu_long, aes(x = variable, y = value, color = educat, group = educat)) + geom_point() +
+  geom_line() +
+  facet_wrap(~countryGDPclass) +
+  theme_minimal() +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_discrete(labels = c("", "Aware", "Treated", "Controlled")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1), legend.position = "bottom",
+        strip.background = element_rect(fill = "NA")) +
+  labs(y = "People Living with Hypertension", 
+       x = "", color = "Education Category",
+       caption = "'Aware' refers to the proportion of people living with hypertension who are aware of their diagnosis. \n 'Treated' refers to the proportion of people living with hypertension who reported being on treatment for hypertension. \n 'Controlled' refers to the proportion of people living with hypertension who have controlled blood pressure.") +
+  guides(color = guide_legend(nrow=2, byrow = TRUE))
+
+```
+
+## Figure S5. Mean difference in cardiovascular disease cases per 1,000 people living with hypertension across education categories, modelled scenarios (either "Diagnosis" or "Treatment" ) and country-level income group
+
+```{r echo = F, fig.dim = c(10, 6)}
+scenarios <- fread("figure4_education_data.csv")
+scenarios$educat <- factor(scenarios$educat,
+                       levels = c("No formal schooling", "Less than primary school", "Primary school completed", "Some high school", "High school or above"))
+
+ggplot(data = scenarios, aes(x = educat, y = cases_averted)) + geom_point(aes(color = Country), alpha = .8) + 
+  geom_smooth(aes(x = as.numeric(educat), y = cases_averted), method = "lm", linewidth = .4, alpha = .1, color = "maroon", fill = "maroon") +
+  facet_grid(scenario~countryGDPclass) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "", y = "Mean Difference in CVD Cases per 1,000\nPeople Living with Hypertension",
+       caption = "Note: Dots represent a country-quintile and are color-coded by country.") +
+  theme(axis.text.x = element_text(angle = 70, hjust = 1))
+
+```
+
+\newpage
+
+## Figure S6. Country-specific Plots of Baseline Hypertension Care Cascade Performance, Mean CVD Risk (%), Mean Difference in CVD Cases per 1,000 People Living with Hypertension, and Mean Relative Decline (%) in CVD Risk Compared to Baseline, by Wealth Quintile and Scenario
+
+```{r echo = FALSE, include = FALSE}
+
+countries <- unique(mean_risk$country) 
+
+countries = set_names(countries, countries)
+
+# cascades
+
+# edits to add 100% htn step
+prop_htn <- cascades %>%
+  group_by(Country, wealth_quintile, countryGDPclass) %>%
+ summarize(cascade_variable = "prop_htn",
+         value = 100,
+         lower = 100,
+         upper = 100)
+
+cascade_q <- cascades %>%
+  rbind(prop_htn) %>%
+  arrange(cascade_variable, value)
+
+cascade_q$cascade_variable <- factor(cascade_q$cascade_variable,
+                                        levels = c("prop_htn","Aware","Treated", "Controlled"),
+                                        labels = c("Hypertensives", "Aware", "Treated", "Controlled"))
+
+cascade_levels <- function(x) {
+  
+  for_plot <- cascade_q %>%
+    filter(Country==x)
+  
+# low income cascades by country and quintile
+label_cascades <- ggplot(data = for_plot, 
+               aes(x = factor(cascade_variable), 
+                    y = value, 
+                    group = wealth_quintile, 
+                    colour = wealth_quintile)) +
+  geom_line(stat = "identity") +
+  scale_y_continuous(labels = comma) +
+  scale_x_discrete(labels = c("", "Aware", "Treated", "Controlled"), expand = c(0.05,0.05)) +
+  guides(fill=guide_legend(title="Wealth Quintile")) +
+  labs(y = "Proportion of People Living with Hypertension", x = "",
+       color = "Wealth Quintile",
+       caption = "'Aware' refers to the proportion of people living with hypertension \n who are aware of their diagnosis. \n 'Treated' refers to the proportion of people living with hypertension \n who reported being on treatment for hypertension. \n 'Controlled' refers to the proportion of people living with hypertension \n who have controlled blood pressure.") +
+  ggtitle(paste0(x, ":", " ", "Cascades by Wealth Quintile")) +
+  theme_classic() +
+  theme(legend.position = "bottom",
+        panel.spacing.x = unit(2,"mm"),
+        axis.text.x = element_text(angle = -40),
+        strip.text = element_text(size = 6, 
+                                  margin = margin()),
+        title = element_text(size = 10)) +
+  theme(aspect.ratio=10/20) 
+  #coord_fixed(0.5) +
+  #facet_wrap(~Country)
+             #, scales = 'free') 
+             #, ncol=3) 
+
+label_cascades
+}
+
+
+dots_fx <- function(x){
+  
+  graph <- rel %>%
+    filter(country == x)
+  
+dots <- ggplot(data = graph, 
+  aes(x = wealth_quintile, 
+      y = mean,
+     color = scenario,
+     group = scenario)) + 
+    geom_point(stat = "identity") +
+  geom_line() +
+        geom_errorbar(aes(ymin = lower, 
+                          ymax = upper),
+                          width = .15) +
+    scale_y_continuous(labels = comma) +
+   #geom_smooth(color="maroon3", fill="grey75", alpha=0.5, linetype="solid",
+   #           se=F, formula = y ~ x, method="lm", size=0.5, fullrange=T) +
+  #scale_fill_discrete(labels = c("Q1", "Q2", "Q3", "Q4", "Q5")) +
+  guides(color=guide_legend(title="")) +
+  labs(y = "Mean Decline (%) in CVD Risk from Baseline", x = "",
+       caption = "Note: Vertical bars represent 95% confidence intervals for Baseline and \n 95% uncertainty intervals for the Diagnosis and Treatment scenarios.") +
+  ggtitle(paste0(x,":"," ", "Mean Decline (%) in CVD Risk \n from Baseline")) +
+  theme_classic() +
+  ylim(0,35) +
+  theme(legend.position="bottom",
+       # legend.text = element_text(size = 16),
+        axis.text.x = element_text(color = "black", size = 13),
+        axis.text.y = element_text(color = "black", size = 9),
+        title = element_text(size = 10)) 
+#+
+   #facet_wrap(~country)
+
+dots
+
+}
+
+
+## Absolute difference graphs
+
+dots_fx_abs <- function(x){
+  
+  graph <- abs %>%
+    filter(country == x)
+  
+dots <- ggplot(data = graph, 
+  aes(x = wealth_quintile, 
+      y = mean,
+     color = scenario,
+     group = scenario)) + 
+    geom_point(stat = "identity") +
+  geom_line() +
+        geom_errorbar(aes(ymin = lower, 
+                          ymax = upper),
+                          width = .15) +
+    scale_y_continuous(labels = comma) +
+  scale_color_brewer(palette = "Dark2", direction = -1) + 
+   #geom_smooth(color="maroon3", fill="grey75", alpha=0.5, linetype="solid",
+   #           se=F, formula = y ~ x, method="lm", size=0.5, fullrange=T) +
+  #scale_fill_discrete(labels = c("Q1", "Q2", "Q3", "Q4", "Q5")) +
+  guides(color=guide_legend(title="")) +
+  labs(y = "Mean difference in CVD cases per 1,000 people", x = "",
+       caption = "Note: Vertical bars represent 95% confidence intervals for Baseline and \n 95% uncertainty intervals for the Diagnosis and Treatment scenarios.") +
+  ggtitle(paste0(x,":"," ", "Mean Difference in CVD Cases \n per 1,000 People Living with Hypertension")) +
+          #":"," ", "Mean Difference in CVD cases per 1,000 people")) +
+    ylim(0,70) +
+  theme_classic() +
+  theme(legend.position="bottom",
+       # legend.text = element_text(size = 16),
+        axis.text.x = element_text(color = "black", size = 13),
+        axis.text.y = element_text(color = "black", size = 9),
+        title = element_text(size = 10)) 
+#+
+   #facet_wrap(~country)
+
+dots
+
+}
+
+
+# mean CVD graphs
+
+dots_cvd <- function(x){
+  
+  graph_cvd2 <- mean_risk %>%
+    filter(country == x)
+  
+dots <- ggplot(data = graph_cvd2, 
+  aes(x = factor(wealth_quintile), 
+      y = mean, 
+      color = as.factor(wealth_quintile))) +
+      #fill = name)) + 
+        geom_point(stat = "identity") +
+        geom_errorbar(aes(ymin = lower, 
+                          ymax = upper),
+                          width = .15) +
+    scale_y_continuous(labels = comma) +
+  #scale_fill_discrete(labels = c("Q1", "Q2", "Q3", "Q4", "Q5")) +
+  guides(color=guide_legend(title="Wealth Quintile")) +
+  #scale_fill(guide = 'none') +
+  labs(y = "Mean 10-year CVD risk", x = "",
+       caption = "Note: Vertical bars represent 95% confidence intervals for Baseline and \n 95% uncertainty intervals for the Diagnosis and Treatment scenarios.") +
+  ggtitle(paste0(x,":"," ", "Mean CVD Risk (%)")) +
+      ylim(0,40) +
+  theme_classic() +
+  theme(legend.position="bottom",
+        axis.text.x = element_text(color = "black"),
+         title = element_text(size = 10))  +
+  facet_wrap(~scenario)
+
+dots
+}
+
+
+
+```
+
+```{r echo = F, include = F, eval = T}
+
+library(cowplot)
+library(gridExtra)
+
+cascade_plots <- map(countries, ~cascade_levels(.))
+country_plots <- map(countries, ~dots_fx(.))
+country_plots_abs <- map(countries, ~dots_fx_abs(.))
+mean_cvd_plots <- map(countries, ~dots_cvd(.))
+
+```
+
+```{r echo = F, eval = T, results='asis', fig.dim = c(9, 6)}
+
+for (i in 1:52){
+  
+p1 <- cascade_plots[[i]]
+p2 <- mean_cvd_plots[[i]]
+p3 <- country_plots[[i]]
+p4 <- country_plots_abs[[i]]
+
+
+print(plot_grid(p1, p2, ncol = 2, nrow = 1))
+cat("\n\n\\pagebreak\n")
+print(plot_grid(p3, p4, ncol = 2, nrow = 1))
+cat("\n\n\\pagebreak\n")
+
+}
+
+```
+
+\newpage
+
+## Table S4. Mean Difference (95% Uncertainty Interval) in CVD Cases per 1,000 People Living with Hypertension compared to Baseline by Country, Wealth Quintile, and Scenario
+
+```{r echo = FALSE}
+
+abs_table <- abs %>% 
+  arrange(country, name, wealth_quintile) %>%
+  mutate(across(c(mean, lower, upper), ~round(.,1))) %>%
+  ungroup() %>%
+  mutate(bounds = paste0(mean, " ", "(", lower, ",", upper, ")")) %>%
+  dplyr::select(Country = country, 
+         Scenario = scenario, 
+         "Wealth Quintile" = wealth_quintile, 
+         "Mean Difference in CVD Cases per 1,000 People Living with Hypertension (95% UI)" = bounds)
+
+abs_table2 <- abs_table %>%
+  pivot_wider(names_from = "Wealth Quintile", values_from = c("Mean Difference in CVD Cases per 1,000 People Living with Hypertension (95% UI)"))
+
+#kbl(abs_table2, caption = "Mean (95% Uncertainty Interval) Difference in CVD Cases per 1,000 People Living with HypertensionCompared to Baseline by Country, Wealth Quintile, and Scenario", booktabs = T) %>% 
+#  kable_styling(latex_options = c("striped", "hold_position")) 
+
+kbl(abs_table2,
+    booktabs = TRUE,
+    longtable = TRUE) %>%
+    #format = "latex") %>%
+  kable_styling(
+      position = "left",
+      latex_options = c("striped", "repeat_header"),
+      stripe_color = "gray!15") %>%
+  footnote(general_title = "Note.", 
+           footnote_as_chunk = TRUE,
+           threeparttable = TRUE,
+           general = "Baseline scenario used the observed survey data for each country and wealth quintile. 'Diagnosis' scenario improved awareness to 79.8% of people living with hypertension being aware of their status across countries and wealth quintiles, and used country and quintile specific linkage to treatment rates at baseline to estimate individuals initiated on treatment. 'Treatment' scenario improved treatment coverage to 70.8% across countries and wealth quintiles.")
+
+```
+
+\newpage
+
+## Table S5. Mean Relative Decline (%) in CVD Risk Compared to Baseline by Country, Wealth Quintile, and Scenario
+
+```{r echo = FALSE}
+
+rel_table <- rel %>% 
+  arrange(country, name, wealth_quintile) %>%
+  mutate(across(c(mean, lower, upper), ~round(.,1))) %>%
+  ungroup() %>%
+  mutate(bounds = paste0(mean, " ", "(", upper, ",", lower, ")")) %>% # with rel decline, upper bound (of mean CVD) is actually lowest value
+  dplyr::select(Country = country, 
+         Scenario = scenario, 
+         "Wealth Quintile" = wealth_quintile, 
+         "Mean Relative Decline (%) in CVD Risk (95% UI)" = bounds)
+
+rel_table2 <- rel_table %>%
+  pivot_wider(names_from = "Wealth Quintile", values_from = c("Mean Relative Decline (%) in CVD Risk (95% UI)"))
+
+#kbl(rel_table2, caption = "Mean (95% Uncertainty Interval) Relative Decline (%) in CVD Risk Compared to Baseline by Country, Wealth Quintile, and Scenario", booktabs = T) %>% 
+#  kable_styling(latex_options = c("striped", "hold_position")) 
+
+kbl(rel_table2,
+    booktabs = TRUE,
+    longtable = TRUE) %>%
+   # format = "latex"
+  kable_styling(position = "left",
+      latex_options = c("striped", "repeat_header"),
+      stripe_color = "gray!15") %>%
+  footnote(general_title = "Note.", 
+           footnote_as_chunk = TRUE,
+           threeparttable = TRUE,
+           general = "Baseline scenario used the observed survey data for each country and wealth quintile. 'Diagnosis' scenario improved awareness to 79.8% of people living with hypertension being aware of their status across countries and wealth quintiles, and used country and quintile specific linkage to treatment rates at baseline to estimate individuals initiated on treatment. 'Treatment' scenario improved treatment coverage to 70.8% across countries and wealth quintiles. Vertical bars represent 95% confidence intervals for Baseline and 95% uncertainty intervals for the Diagnosis and Treatment scenarios.")
+
+```
+
+\newpage
+
+## Table S6. Ranked Gap in Hypertension Care Cascade Performance Comparing Highest (Q5) and Lowest (Q1) Wealth Quintiles at Baseline by Country
+
+```{r echo = FALSE}
+
+# area under curve gap calculations
+area <- readRDS(file = "3 Output/area-under-quintile-cascades.rds")
+
+area2 <- area %>%
+  group_by(Country) %>%
+  filter(wealth_quintile == 1 | wealth_quintile == 5) %>%
+  pivot_wider(id_cols = c(Country), names_from = wealth_quintile, values_from = area_sum) %>%
+  rename(Q1 = `1`, Q5 = `5`) %>%
+  mutate(auc_gap = Q5-Q1) %>%
+  ungroup() %>%
+  within(auc_gap_rank <- as.integer(cut(auc_gap, quantile(auc_gap, probs=0:3/3), include.lowest=TRUE))) %>%
+  select(Country, auc_gap, auc_gap_rank)
+
+auc_table <- area2 %>%
+  mutate(auc_gap = round(auc_gap,1)) %>%
+  arrange(desc(auc_gap)) %>%
+  rename(Country = Country,
+         "Q1-Q5 Cascade Performance Gap" = auc_gap,
+         "Tertile Ranking" = auc_gap_rank)
+
+#kbl(auc_table, caption = "Gap in cascade performance comparing highest (Q5) and lowest (Q1) quintiles at baseline by country", booktabs = T) %>% kable_styling(latex_options = c("striped", "hold_position")) %>%
+#  footnote(symbol = "Gap measured as the difference in the area under the cascade between Q5 and Q1. Higher number indicates #larger gap between Q5 and Q1.", footnote_as_chunk = T)
+
+kbl(auc_table,
+    booktabs = TRUE,
+    longtable = TRUE) %>%
+    #format = "latex") %>%
+  kable_styling(position = "left",
+      latex_options = c("striped", "repeat_header"),
+      stripe_color = "gray!15") %>%
+  footnote(general_title = "Note.", 
+           footnote_as_chunk = TRUE,
+           threeparttable = TRUE,
+           general = "Performance gap was calculated by taking the difference in the area under the cascade between the highest and lowest wealth quintiles in each country. Countries were sorted by the performance gap and split in terciles representing the top, middle, and bottom third across countries. Tercile 1 corresponds to the lowest ranking countries while Tercile 3 is the highest ranking countries (i.e. countries with the largest difference in area under the cascades between the lowest and highest wealth quintiles).")
+
+
+```
+
+\newpage
+
+## Table S7. Sensitivity Analysis: Mean Difference (95% uncertainty interval) in CVD Cases per 1,000 People Living with Hypertension compared to Baseline by Country, Wealth Quintile, and Scenario
+
+```{r echo = FALSE}
+
+abs_sens <- readRDS("3 Output/abs-sens.rds")
+rel_sens <- readRDS("3 Output/rel-sens.rds")
+mean_risk_sens <- readRDS("3 Output/mean_risk-sens.rds")
+
+abs_table3 <- abs_sens %>% 
+  arrange(country, name, wealth_quintile) %>%
+  mutate(across(c(mean, lower, upper), ~round(.,1))) %>%
+  ungroup() %>%
+  mutate(bounds = paste0(mean, " ", "(", lower, ",", upper, ")")) %>%
+  dplyr::select(Country = country, 
+         Scenario = scenario, 
+         "Wealth Quintile" = wealth_quintile, 
+         "Mean Difference in CVD Cases per 1,000 People Living with Hypertension (95% UI)" = bounds)
+
+abs_table4 <- abs_table3 %>%
+  pivot_wider(names_from = "Wealth Quintile", values_from = c("Mean Difference in CVD Cases per 1,000 People Living with Hypertension (95% UI)"))
+
+#kbl(abs_table2, caption = "Mean (95% Uncertainty Interval) Difference in CVD Cases per 1,000 People Living with HypertensionCompared to Baseline by Country, Wealth Quintile, and Scenario", booktabs = T) %>% 
+#  kable_styling(latex_options = c("striped", "hold_position")) 
+
+kbl(abs_table4,
+    booktabs = TRUE,
+    longtable = TRUE) %>%
+    #format = "latex") %>%
+  kable_styling(
+      position = "left",
+      latex_options = c("striped", "repeat_header"),
+      stripe_color = "gray!15") %>%
+  footnote(general_title = "Note.", 
+           footnote_as_chunk = TRUE,
+           threeparttable = TRUE,
+           general = "'Diagnosis' scenario in the sensitivity analysis improved awareness to the level of the best performing wealth quintile within each country, and used country and quintile specific linkage to treatment rates at baseline to estimate individuals initiated on treatment. 'Treatment' scenario in the sensitivity analysis improved treatment coverage to the level of the best performing wealth quintile within each country. NA values indicate the wealth quintile that was used as the target for the scenario within each country, so the change in CVD risk for that wealth quintile is 0 (as it was the target).")
+
+```
+
+\newpage
+
+## Table S8. Sensitivity Analysis: Mean Relative (%) Decline (95% uncertainty interval) in CVD Risk Compared to Baseline by Country, Wealth Quintile, and Scenario
+
+```{r echo = FALSE}
+
+rel_table3 <- rel_sens %>% 
+  arrange(country, name, wealth_quintile) %>%
+  mutate(across(c(mean, lower, upper), ~round(.,1))) %>%
+  ungroup() %>%
+  mutate(bounds = paste0(mean, " ", "(", upper, ",", lower, ")")) %>% # with rel decline, upper bound (of mean CVD) is actually lowest value
+  dplyr::select(Country = country, 
+         Scenario = scenario, 
+         "Wealth Quintile" = wealth_quintile, 
+         "Mean Relative Decline (%) in CVD Risk (95% UI)" = bounds)
+
+rel_table4 <- rel_table3 %>%
+  pivot_wider(names_from = "Wealth Quintile", values_from = c("Mean Relative Decline (%) in CVD Risk (95% UI)"))
+
+#kbl(rel_table2, caption = "Mean (95% Uncertainty Interval) Relative Decline (%) in CVD Risk Compared to Baseline by Country, Wealth Quintile, and Scenario", booktabs = T) %>% 
+#  kable_styling(latex_options = c("striped", "hold_position")) 
+
+kbl(rel_table4,
+    booktabs = TRUE,
+    longtable = TRUE) %>%
+   # format = "latex"
+  kable_styling(position = "left",
+      latex_options = c("striped", "repeat_header"),
+      stripe_color = "gray!15") %>%
+  footnote(general_title = "Note.", 
+           footnote_as_chunk = TRUE,
+           threeparttable = TRUE,
+           general = "'Diagnosis' scenario in the sensitivity analysis improved awareness to the level of the best performing wealth quintile within each country, and used country and quintile specific linkage to treatment rates at baseline to estimate individuals initiated on treatment. 'Treatment' scenario in the sensitivity analysis improved treatment coverage to the level of the best performing wealth quintile within each country. NA values indicate the wealth quintile that was used as the target for the scenario within each country, so the change in CVD risk for that wealth quintile is 0 (as it was the target).")
+
+```
+
+\newpage
+
+## Figure S8. Sensitivity Analysis: Mean Relative Decline (%) in CVD Risk Compared to Baseline by Country Income Group, Wealth Quintile, and Scenario
+
+```{r echo = FALSE, fig.dim = c(10, 6)}
+
+ggplot(data = rel_sens, 
+               aes(x = wealth_quintile, 
+                          y = mean,
+                   color = country)) +
+                   #label = plot_label)) +
+  geom_jitter(position=position_jitter(width=0.1), alpha = 0.5) +
+  #geom_text(position = position_jitter(seed = 1), size = 2) +
+  geom_smooth(aes(group = countryGDPclass), fill="grey75", alpha=0.5, 
+              linetype="solid", color = "maroon",
+              se=F, formula = y ~ x, method = "lm", linewidth=0.5, fullrange=T) +
+              #method = "loess", 
+  scale_y_continuous(labels = comma) +
+  guides(fill=guide_legend(title="Wealth Quintile")) +
+  labs(y = "Mean Relative Decline (%) in CVD Risk Compared to Baseline", x = "Weath Quintile",
+       caption = "Note: Dots represent a country-quintile and are color coded by country. \n 'Diagnosis' scenario in the sensitivty analysis improved awareness to the level of the best performing wealth quintile within each country, \n and used country and quintile specific linkage to treatment rates at baseline to estimate individuals initiated on treatment. \n 'Treatment' scenario in the sensitivity analysis improved treatment coverage to the level of the best performing wealth quintile within each country.") +
+  theme_classic() +
+  theme(legend.position = "",
+        strip.text = element_text(face = "bold", size = 12)) +
+  facet_grid(cols = vars(countryGDPclass), rows = vars(scenario))
+
+
+```
+
+\newpage
+
+## Figure S9. Sensitivity Analysis: Mean Difference in CVD Cases per 1,000 People Living with Hyperntesion compared to Baseline by Country-level Income Group, Wealth Quintile, and Scenario
+
+```{r echo = FALSE, fig.dim = c(10, 6)}
+
+ggplot(data = abs_sens, 
+               aes(x = wealth_quintile, 
+                          y = mean,
+                   color = country)) +
+                   #label = plot_label)) +
+  geom_jitter(position=position_jitter(width=0.1), alpha = 0.5) +
+  #geom_text(position = position_jitter(seed = 1), size = 2) +
+  geom_smooth(aes(group = countryGDPclass), fill="grey75", alpha=0.5, 
+              linetype="solid", color = "maroon",
+              se=F, formula = y ~ x, method = "lm", linewidth=0.5, fullrange=T) +
+              #method = "loess", 
+  scale_y_continuous(labels = comma) +
+  guides(fill=guide_legend(title="Wealth Quintile")) +
+  labs(y = "Mean Difference in CVD Cases per 1,000 People Living with Hypertension", x = "Weath Quintile",
+       caption = "Note: Dots represent a country-quintile and are color coded by country. \n 'Diagnosis' scenario in the sensitivty analysis improved awareness to the level of the best performing wealth quintile within each country, \n and used country and quintile specific linkage to treatment rates at baseline to estimate individuals initiated on treatment. \n 'Treatment' scenario in the sensitivity analysis improved treatment coverage to the level of the best performing wealth quintile within each country.") +
+  theme_classic() +
+  theme(legend.position = "",
+        strip.text = element_text(face = "bold", size = 12)) +
+  facet_grid(cols = vars(countryGDPclass), rows = vars(scenario)) 
+
+```
+
+\newpage
+
+## Table S9. Absolute (percentage point) difference in mean 10-year cardiovascular disease risk comparing the lowest (Q1) and highest (Q5) wealth quintiles by country and modelled scenario, either "Baseline", "Diagnosis" or "Treatment" scenario.
+
+```{r echo = F}
+difference <- readRDS("3 Output/difference-cvd-risk.rds")
+
+diff_table <- difference %>%
+  mutate(difference1_5 = round(difference1_5, 2)) %>%
+    #arrange(-difference1_5) %>%
+  select(Country = country, Scenario = scenario, 
+         "Absolute (percenage point) difference in mean CVD risk (Q1-Q5)" = difference1_5)
+
+kbl(diff_table,
+    booktabs = TRUE,
+    longtable = TRUE) %>%
+   # format = "latex"
+  kable_styling(position = "left",
+      latex_options = c("striped", "repeat_header"),
+      stripe_color = "gray!15") %>%  
+  footnote(general_title = "Note.", 
+           footnote_as_chunk = TRUE,
+           threeparttable = TRUE,
+           general = "Absolute difference is the percentage point difference in CVD risk comparing the lowest (Q1) and highest (Q5) wealth quintiles in each scenario. Baseline scenario used the observed survey data for each country and wealth quintile. 'Diagnosis' scenario improved awareness to 79.8% of people living with hypertension being aware of their status across countries and wealth quintiles, and used country and quintile specific linkage to treatment rates at baseline to estimate individuals initiated on treatment. 'Treatment' scenario improved treatment coverage to 70.8% across countries and wealth quintiles. Vertical bars represent 95% confidence intervals for Baseline and 95% uncertainty intervals for the Diagnosis and Treatment scenarios.")
+
+```
+
+```{r eval = F, echo = F, include = F}
+
+## slopes
+# add a grouping variable (or many!)
+slopes_abs_income <- abs %>%
+  group_by(countryGDPclass, scenario) %>%
+  summarize(
+    slope = round(lm(mean ~ wealth_quintile)$coefficients[2], 2),
+    significance = summary(lm(mean ~ wealth_quintile))$coefficients[2, 4]) %>%
+  arrange(scenario)
+
+## slopes
+# add a grouping variable (or many!)
+slopes_abs_gap <- graph_abs_4 %>%
+  group_by(auc_gap_rank2, name) %>%
+  summarize(
+    slope = round(lm(value ~ wealth_quintile)$coefficients[2], 2),
+    significance = summary(lm(value ~ wealth_quintile))$coefficients[2, 4]) %>%
+  arrange(name)
+
+```

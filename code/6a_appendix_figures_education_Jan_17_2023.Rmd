@@ -1,0 +1,55 @@
+---
+title: "Education Appendix Results"
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(data.table)
+library(ggplot2)
+```
+
+Appendix Figure XX. Mean proportion of people living with hypertension aware of their diagnosis, on treatment, and with controlled blood pressure by education category across low-income, lower-middle income, and upper-middle income country groups.
+
+```{r}
+cascade_edu_long <- fread("~/Documents/Stanford/Projects/CVD SES/output/figures/figure1_education_data.csv")
+
+cascade_edu_long$educat <- factor(cascade_edu_long$educat,
+                       levels = c("No formal schooling", "Less than primary school", "Primary school completed", "Some high school", "High school or above"))
+cascade_edu_long$variable <- factor(cascade_edu_long$variable, 
+                                    levels = c("mean_htn", "mean_aware", "mean_treated", "mean_controlled"))
+
+ggplot(data = cascade_edu_long, aes(x = variable, y = value, color = educat, group = educat)) + geom_point() +
+  geom_line() +
+  facet_wrap(~countryGDPclass) +
+  theme_bw() +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_discrete(labels = c("", "Aware", "Treated", "Controlled")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1), legend.position = "bottom",
+        strip.background = element_rect(fill = "NA")) +
+  labs(y = "People Living with Hypertension", 
+       x = "", color = "Education Category") +
+  guides(color = guide_legend(nrow=2, byrow = TRUE))
+
+```
+
+Appendix Figure XX. Mean difference in cardiovascular disease cases per 1,000 people living with hypertension across education categories, modelled scenarios (either “Diagnosis” (Scenario 1) or “Treatment” (Scenario 2)) and country-level income group.
+
+```{r}
+scenarios <- fread("~/Documents/Stanford/Projects/CVD SES/output/figures/figure4_education_data.csv")
+scenarios$educat <- factor(scenarios$educat,
+                       levels = c("No formal schooling", "Less than primary school", "Primary school completed", "Some high school", "High school or above"))
+
+ggplot(data = scenarios, aes(x = educat, y = cases_averted)) + geom_point(aes(color = Country), alpha = .8) + 
+  geom_smooth(aes(x = as.numeric(educat), y = cases_averted), method = "lm", size = .4, alpha = .1, color = "maroon", fill = "maroon") +
+  facet_grid(scenario~countryGDPclass) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(x = "", y = "Mean Difference in CVD Cases per 1,000\nPeople Living with Hypertension") +
+  theme(axis.text.x = element_text(angle = 70, hjust = 1))
+
+```
