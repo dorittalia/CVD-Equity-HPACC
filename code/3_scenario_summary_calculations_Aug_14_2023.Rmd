@@ -1,0 +1,168 @@
+---
+title: "Scenario Summary Calculations"
+author: "Dorit Stein"
+date: "6/12/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(stringr)
+
+```
+
+# 0. load data
+
+```{r load data}
+
+# s1 results
+s1 <- readRDS("3 Output/s1-overall.rds") %>%
+  unnest(s1_output)
+s1_income <- readRDS("3 Output/s1-income.rds") %>%
+  unnest(s1_output)
+s1_perf <- readRDS("3 Output/s1-perf.rds") %>%
+  unnest(s1_output)
+s1_sens <- readRDS("3 Output/s1-sens.rds") %>%
+  unnest(s1_output)
+s1_rel <- readRDS("3 Output/s1-rel.rds") %>%
+  unnest(s1_output)
+
+# s2 results
+s2 <- readRDS("3 Output/s2-overall.rds") %>%
+  unnest(s2_output)
+s2_income <- readRDS("3 Output/s2-income.rds") %>%
+  unnest(s2_output)
+s2_perf <- readRDS("3 Output/s2-perf.rds") %>%
+  unnest(s2_output)
+s2_sens <- readRDS("3 Output/s2-sens.rds") %>%
+  unnest(s2_output)
+s2_rel <- readRDS("3 Output/s2-rel.rds") %>%
+  unnest(s2_output)
+
+# baseline to merge in and get relative change in CVD risk
+baseline <- readRDS("3 Output/baseline-calcs.rds")
+
+```
+
+# 1. Summary calculations from scenario 1 + 2 output
+
+-baseline
+```{r clean scenarios and summary calculations}
+
+baseline1 <- baseline %>%
+  rename(country = Country)
+
+#baseline
+baseline2 <- baseline1 %>%
+  mutate(scenario = "Baseline",
+         measure = "mean_cvd_risk",
+         name = "Mean CVD Risk (%)") %>%
+  mutate(mean = mean_cvd_risk_b*100,
+         lower = mean_cvd_risk_b_low*100,
+         upper = mean_cvd_risk_b_upp*100) %>%
+  select(-mean_cvd_risk_b, -mean_cvd_risk_b_low, -mean_cvd_risk_b_upp) %>%
+  mutate(scenario_type = "baseline")
+
+saveRDS(baseline2, "3 Output/baseline2.rds")
+
+#baseline2 <- readRDS("3 Output/baseline2.rds")
+
+```
+
+- scenario 1 and scenario 2
+```{r clean scenarios and summary calculations}
+
+# clean scenario results
+
+clean_scenario1 <- function(s1) {
+
+s1_calcs <- s1 |>
+  mutate(mean = case_when(name == "mean_rel_change_s1_rnorm" ~ mean*100, # relative (%) change in CVD risk
+                          name == "mean_cvd_risk_s1_rnorm" ~ mean*100, # mean CVD risk (%)
+                          name == "mean_risk_d_s1_rnorm" ~ mean*1000,  # mean difference in CVD cases per 1,000 hypertensives
+                          TRUE ~ NA_real_),
+         lower = case_when(name == "mean_rel_change_s1_rnorm" ~ lower*100,
+                           name == "mean_cvd_risk_s1_rnorm" ~ lower*100,
+                           name == "mean_risk_d_s1_rnorm" ~ lower*1000,
+                           TRUE ~ NA_real_),
+         upper = case_when(name == "mean_rel_change_s1_rnorm" ~ upper*100,
+                           name == "mean_cvd_risk_s1_rnorm" ~ upper*100,
+                           name == "mean_risk_d_s1_rnorm" ~ upper*1000,
+                           TRUE ~ NA_real_)) |>
+  mutate(scenario = "Scenario 1: Diagnosis",
+         measure = case_when(name == "mean_rel_change_s1_rnorm" ~ "mean_rel_c",
+                             name == "mean_cvd_risk_s1_rnorm" ~ "mean_cvd_risk",
+                             name == "mean_risk_d_s1_rnorm" ~ "mean_risk_d"),
+         name = case_when(name == "mean_rel_change_s1_rnorm" ~ "Mean Relative (%) Change in CVD Risk",
+                          name == "mean_cvd_risk_s1_rnorm" ~ "Mean CVD Risk (%)",
+                          name == "mean_risk_d_s1_rnorm" ~ "Mean Difference in CVD Cases per 1,000 Hypertensives")) 
+
+s1_calcs
+
+}
+# scenario 2
+
+clean_scenario2 <- function(s2) {
+  
+  s2_calcs <- s2 |>
+  mutate(mean = case_when(name == "mean_rel_change_s2_rnorm" ~ mean*100, # relative (%) change in CVD risk
+                          name == "mean_cvd_risk_s2_rnorm" ~ mean*100, # mean CVD risk (%)
+                          name == "mean_risk_d_s2_rnorm" ~ mean*1000,  # mean difference in CVD cases per 1,000 hypertensives
+                          TRUE ~ NA_real_),
+         lower = case_when(name == "mean_rel_change_s2_rnorm" ~ lower*100,
+                           name == "mean_cvd_risk_s2_rnorm" ~ lower*100,
+                           name == "mean_risk_d_s2_rnorm" ~ lower*1000,
+                           TRUE ~ NA_real_),
+         upper = case_when(name == "mean_rel_change_s2_rnorm" ~ upper*100,
+                           name == "mean_cvd_risk_s2_rnorm" ~ upper*100,
+                           name == "mean_risk_d_s2_rnorm" ~ upper*1000,
+                           TRUE ~ NA_real_)) |>
+  mutate(scenario = "Scenario 2: Treatment",
+         measure = case_when(name == "mean_rel_change_s2_rnorm" ~ "mean_rel_c",
+                             name == "mean_cvd_risk_s2_rnorm" ~ "mean_cvd_risk",
+                             name == "mean_risk_d_s2_rnorm" ~ "mean_risk_d"),
+         name = case_when(name == "mean_rel_change_s2_rnorm" ~ "Mean Relative (%) Change in CVD Risk",
+                          name == "mean_cvd_risk_s2_rnorm" ~ "Mean CVD Risk (%)",
+                          name == "mean_risk_d_s2_rnorm" ~ "Mean Difference in CVD Cases per 1,000 Hypertensives"))
+  
+  s2_calcs
+}
+
+# clean each scenario type
+s1_overall <- clean_scenario1(s1) %>%
+  mutate(scenario_type = "overall")
+s1_income <- clean_scenario1(s1_income) %>%
+  mutate(scenario_type = "income")
+s1_perf <- clean_scenario1(s1_perf) %>%
+  mutate(scenario_type = "perf") 
+s1_sens <- clean_scenario1(s1_sens) %>%
+  mutate(scenario_type = "sens")
+s1_rel <- clean_scenario1(s1_rel) %>%
+  mutate(scenario_type = "rel")
+
+s2_overall <- clean_scenario2(s2) %>%
+  mutate(scenario_type = "overall")
+s2_income <- clean_scenario2(s2_income) %>%
+  mutate(scenario_type = "income")
+s2_perf <- clean_scenario2(s2_perf) %>%
+  mutate(scenario_type = "perf") 
+s2_sens <- clean_scenario2(s2_sens) %>%
+  mutate(scenario_type = "sens")
+s2_rel <- clean_scenario2(s2_rel) %>%
+  mutate(scenario_type = "rel")
+
+###bind results from scenario 1, scenario 2, and baseline
+scenario_calcs <- rbind(s1_overall, s2_overall, 
+                        s1_income, s2_income, 
+                        s1_perf, s2_perf, 
+                        s1_sens, s2_sens,
+                        s1_rel, s2_rel,
+                        baseline2)
+
+# save
+saveRDS(scenario_calcs, file = "3 Output/all-scenarios.rds")
+
+```
+

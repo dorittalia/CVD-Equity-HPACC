@@ -6,11 +6,16 @@ library(countrycode)
 
 options(scipen=999)
 
+## end data
+data <- read_csv("1 Raw Data/cleaned_final.csv") # August 31, 2022
+
 ## Read and clean data. These datasets have selected a reduced set of columns from the .dta files posted on the HPACC onedrive.
-df <- fread("~/Documents/Stanford/Projects/CVD SES/whocvdrisk/2020_data_short.csv")
-temp <- fread("~/Documents/Stanford/Projects/CVD SES/whocvdrisk/2019_data_short.csv")
+df <- fread("HTN Cascade- Marissa/Old/original_data/2020_data_short.csv")
+temp <- fread("HTN Cascade- Marissa/Old/original_data/2019_data_short.csv")
+#temp2 <- fread("HTN Cascade- Marissa/Old/original_data/older_data_short.csv")
+
 df <- rbind(df, temp)
-temp <- fread("~/Documents/Stanford/Projects/CVD SES/whocvdrisk/older_data_short.csv")
+temp <- fread("HTN Cascade- Marissa/Old/original_data/older_data_short.csv")
 temp <- temp[, hh_id:=as.character(hh_id)] ## Match class for now
 df <- rbind(df, temp)
 rm(temp)
@@ -22,7 +27,7 @@ df <- df[Country=="Kyrgyz Republic", Country:="Kyrgyzstan"] ## Rename to match
 nrow(df) ## 1598304 observations
 nrow(unique(df[,.(Country, year, svy)]))## 86 surveys (country-year)
 df <- df[, country_year:=paste0(Country, " ", year)]
-df <- df[!is.na(age) & !is.na(sex)] ## 1596399 observations
+#df <- df[!is.na(age) & !is.na(sex)] ## 1596399 observations
 df <- df[age>=40 & age<80] ## 531177 observations
 
 ## Country-specific cleaning
@@ -54,8 +59,47 @@ df <- df[hbp_diag==1 & (sbp<140 & dbp<90), hbp_controlled:=1] ## Uses 140/90 for
 ## Clean missing edu strings
 df <- df[educat=="" | educat==".c", educat:=NA]
 
+library(tidyverse)
+### missing data %
+all <- readRDS("3 Output/all.rds")
+countries <- unique(all$Country)
+
+country <- all %>%
+  distinct(Country)
+
+# dataset with 44 countries, with incomplete cases included to summarize % missing by key variable and country
+missing <- df %>%
+  filter(Country %in% countries)
+
+#country_miss <- unique(missing$Country)
+country_miss <- missing %>%
+  distinct(Country)
+
+rename <- anti_join(country, country_miss)
+
+# summarize missingness
+# missing cascade variables?
+data_missing <- missing %>%
+  group_by(Country) %>%
+  mutate(n = n()) %>%
+  summarize(across(.cols = c(sbp, 
+                             age, 
+                             sex, 
+                             bmi,
+                             educat,
+                             wealth_quintile, 
+                             csmoke),
+                   list(~sum(is.na(.)),
+                        ~n()))) 
+
+
+df2 <- df[!is.na(sbp) & !is.na(age) & !is.na(sex) & !is.na(bmi) & (!is.na(educat) | !is.na(wealth_quintile)) & !is.na(csmoke)] ## Final dataset = 396978 observations with either complete lab or non-lab indicators
+
+
 ## Keep complete observations (consider multiple imputation in the future)
-df <- df[!is.na(sbp) & !is.na(age) & !is.na(sex) & !is.na(bmi) & (!is.na(educat) | !is.na(wealth_quintile)) & !is.na(csmoke)] ## Final dataset = 396978 observations with either complete lab or non-lab indicators
+df2 <- df[!is.na(sbp) & !is.na(age) & !is.na(sex) & !is.na(bmi) & (!is.na(educat) | !is.na(wealth_quintile)) & !is.na(csmoke)] ## Final dataset = 396978 observations with either complete lab or non-lab indicators
+
+
 
 # test2 <- merge(test[Country=="Guyana" & !is.na(wealth_quintile) & age!=67 & age !=76 & clin_hypt==1 & !is.na(w_bp) & psu!=""],
 #                test1[Country=="GUYANA"], by = c("sbp_round", "bmi_round", "age", "sex", "psu"), all=T)

@@ -1,7 +1,7 @@
 ---
 title: "Pre-scenario coding"
 author: "Dorit Stein"
-date: "1/17/2022"
+date: "6/21/23"
 output: html_document
 ---
 
@@ -245,7 +245,7 @@ data4 <- readRDS("3 Output/data4.rds")
 
 data_sbp <- data4 %>%
   mutate(sex = as.numeric(sex),
-         sbp_change = 9+(0.10*(sbp-154)),
+         sbp_change = 9.1+(0.10*(sbp-154)),
          age_id = case_when(age >=40 & age<45 ~ 13,
                               age >=45 & age<50 ~ 14, 
                               age >=50 & age<55 ~ 15, 
@@ -322,7 +322,7 @@ saveRDS(data_cvd, file= "3 Output/analysis-w-cvd.rds")
  - select "best performers" at each step (create column in dataset with best performer value?)
  - AUC gap calculations
 
-```{r cascades}
+```{r cascades summary}
 
 data_cvd <- readRDS(file= "3 Output/analysis-w-cvd.rds") %>%
   filter(clin_hypt == 1)
@@ -456,21 +456,17 @@ cascade_q_data2 <- cascade_q_data2 %>%
 
 saveRDS(cascade_q_data2, "3 Output/cascade-graph.rds")
 
-#####Identify best performers#####
-#best at each step (irrespective of quintile)
-best_step <- cascade_q_data2 %>%
-  group_by(cascade_variable) %>%
-  filter(value == max(value, na.rm=TRUE))
+#cascade_q_data2 <-readRDS("3 Output/cascade-graph.rds")
+```
 
-saveRDS(best_step, file = "3 Output/best_step.rds")
-
-best_step_quintile <-  cascade_q_data2 %>%
-  group_by(cascade_variable, wealth_quintile) %>%
-  filter(value == max(value, na.rm=TRUE))
-
-saveRDS(best_step_quintile, file = "3 Output/best-step-quintile.rds")
+ - select "best performers" at each step (create column in dataset with best performer value?)
+ -  AUC gap calculations
+  - removed countries with NEGATIVE AUC_gaps (8 countries)
+  
+```{r auc}
 
 ####area under curves####
+data_q <- readRDS("3 Output/quintile_cascades.rds")
 
 area <- data_q %>%
   group_by(Country, wealth_quintile) %>%
@@ -480,92 +476,8 @@ area <- data_q %>%
 
 saveRDS(area, file = "3 Output/area-under-quintile-cascades.rds")
 
-best_area <- area %>%
-  group_by(wealth_quintile) %>%
-  filter(area_sum == max(area_sum, na.rm = T))
-
-saveRDS(best_area, file = "3 Output/best-area-under-quintile-cascades.rds")
-
-```
-
-
-8. Scenario data file prep
- - keep only hypertensives
- - merge in country-level data: (or keep in separate country/country-quintile dataset?)
-    - htn prevalence, auc_gap, countryGDPclass, cascade values
- - set cascade targets by country-quintile and scenario
- - generate baseline cascade performance gap measures/tertiles for graphing stratification
- - join cascade targets and main dataset 
- - select relevant columns
- 
- 
-```{r}
-
-# load Chunk 2 output w/ CVD risk and RR estimates
-data_cvd_rr <- readRDS(file = "3 Output/all-w-RRs.rds")
-# most recent saved dataset of only htns
-
-#####SETTING CASCADE TARGETS####
-
-# merge in country-level cascade information by quintile in order to estimate additional proportion of individuals who need to be aware and/or treated in each scenario
-# will merge this into main dataset
-
-data_q <- readRDS(file = "3 Output/quintile_cascades.rds")
-
-cascades <- data_q %>%
-  mutate(prop_aware = as.numeric(prop_aware),
-         prop_tx = as.numeric(prop_tx))
-rm(data_q)
-
-# figure out target proportion for each country - ie how many of the UNDIAGNOSED hypertensives need to be sample for each country
-# load(file = "3 Output/best-step-quintile.rda")
-best_step <- readRDS(file = "3 Output/best_step.rds")
-
-# best proportion AWARE
-  # 79.85% in Mongolia Q3
-aware <- best_step %>%
-  filter(cascade_variable == "prop_aware") %>%
-  select(value)
-
-#best proportion on TREATMENT
-  #70.85% - Q4 in Kazakhstan
-tx <- best_step %>%
-  filter(cascade_variable == "prop_tx") %>%
-  select(value)
-
-#"proportions" are in percents in cascade summary
-# input as proportions for sampling
-aware_target <- 0.7985
-
-tx_target <- 0.7085
-
-# in percents
-# calculate additional people aware and/or on tx in each scenario for each country-quintile
-# calculate proportion difference/number of additional people required to be sampled (ie made aware or on tx) in each group (ie country, quintile) to reach targets specified above
-cascades2 <- cascades %>%
- # rename(country = Country) %>%
-  mutate(across(prop_aware:prop_control_upp, ~./100)) %>% # get into proportions (not percents)
-  mutate(addl_aware_prop = aware_target-prop_aware, #additional proportion of htn that need to be identified to reach target (target proportion minus proportion aware)
-         addl_aware_und = (addl_aware_prop/(1-prop_aware)), #proportion of the undiagnosed that need to be sampled (ratio)
-          addl_tx_prop = tx_target-prop_tx, #additional proportion of htn on tx (target tx prop minus current tx prop)
-         addl_tx_untr = (addl_tx_prop/(1-prop_tx))) #additional treatment proportion needed divided by the untreated population to get proportion of untreated need to sample from
-
-#join hypertensives with cascade target country-quintile information
-country_cascades <- left_join(data_cvd_rr, cascades2) # join cascade target info (prop_aware, prop_tx needed for scenarios)
-
-# treatment gap
-cascades3<- cascades2 %>%
-  group_by(Country) %>%
-  filter(wealth_quintile == 1 | wealth_quintile == 5) %>%
-  pivot_wider(id_cols = c(Country), names_from = wealth_quintile, values_from = prop_tx) %>%
-  rename(Q1 = `1`, Q5 = `5`) %>%
-  mutate(tx_gap = Q5-Q1) %>%
-  ungroup() %>%
-  within(tx_gap_rank <- as.integer(cut(tx_gap, quantile(tx_gap, probs=0:3/3), include.lowest=TRUE))) 
-
-saveRDS(cascades3, file = "3 Output/cascades3.rds")
-
 # area under curve gap calculations
+  # remove countries that have negative auc_gap
 area <- readRDS(file = "3 Output/area-under-quintile-cascades.rds")
 
 area2 <- area %>%
@@ -575,16 +487,348 @@ area2 <- area %>%
   rename(Q1 = `1`, Q5 = `5`) %>%
   mutate(auc_gap = Q5-Q1) %>%
   ungroup() %>%
-  within(auc_gap_rank <- as.integer(cut(auc_gap, quantile(auc_gap, probs=0:3/3), include.lowest=TRUE))) %>%
-  select(Country, auc_gap_rank)
+  filter(auc_gap > 0) %>%
+  mutate(auc_gap_rank = ntile(auc_gap, 3)) %>%
+  select(Country, auc_gap_rank, auc_gap)
 
+# 44 countries
 saveRDS(area2, file = "3 Output/area2.rds")
 
+# save names of reverse_gap countries to remove below
+reverse_gap <- area %>%
+  group_by(Country) %>%
+  filter(wealth_quintile == 1 | wealth_quintile == 5) %>%
+  pivot_wider(id_cols = c(Country), names_from = wealth_quintile, values_from = area_sum) %>%
+  rename(Q1 = `1`, Q5 = `5`) %>%
+  mutate(auc_gap = Q5-Q1) %>%
+  ungroup() %>%
+  filter(auc_gap < 0) %>%
+  select(Country, auc_gap)
+
+reverse_gap <- unique(reverse_gap$Country)
+
+saveRDS(reverse_gap, "3 Output/reverse-gap.rds")
+
+```
+
+  ## remove countries with negative AUC
+
+```{r cascade best performers}
+
+# 44 countries
+
+#####Identify best performers#####
+
+# ORIGINAL TARGETS (with negative_gap countries removed)
+    
+# best at each step (irrespective of quintile)
+best_step <- cascade_q_data2 %>%
+  filter(!(Country %in% reverse_gap)) %>% # filter out reverse_gap countries
+  group_by(cascade_variable) %>%
+  filter(value == max(value, na.rm=TRUE)) %>%
+  filter(cascade_variable != "prop_control")
+
+saveRDS(best_step, file = "3 Output/best_step.rds")
+
+# NEW TARGETS
+
+# best at each step, BY COUNTRY INCOME GROUP
+best_step_income <- cascade_q_data2 %>%
+  filter(!(Country %in% reverse_gap)) %>% # filter out reverse_gap countries
+  group_by(cascade_variable, countryGDPclass) %>%
+  filter(value == max(value, na.rm=TRUE)) %>%
+  filter(cascade_variable != "prop_control")
+
+saveRDS(best_step_income, file = "3 Output/best_step_income.rds")
+
+# best at each step, BY BASELINE CASCADE PERFORMANCE
+  # by terciles of area under cascade for the best performing quintile in each country
+
+# first make terciles of AUC levels based on largest area under cascade quintile for each country
+area <- readRDS(file = "3 Output/area-under-quintile-cascades.rds")
+
+area3 <- area %>%
+  group_by(Country) %>%
+  filter(!(Country %in% reverse_gap)) %>%
+  filter(area_sum == max(area_sum, na.rm=TRUE)) %>%
+  ungroup() %>%
+  mutate(area_sum_rank = ntile(area_sum, 3)) %>%
+  select(Country, area_sum_rank, area_sum)
+
+saveRDS(area3, file = "3 Output/area-sum-rankings.rds")
+
+# merge in terciles with data to make targetes
+# best at each step, BY COUNTRY INCOME GROUP
+best_step_perf <- cascade_q_data2 %>%
+  filter(!(Country %in% reverse_gap)) %>% # filter out reverse_gap countries
+  left_join(area3) %>%
+  group_by(cascade_variable, area_sum_rank) %>%
+  filter(value == max(value, na.rm=TRUE)) %>%
+  filter(cascade_variable != "prop_control")
+
+saveRDS(best_step_perf, file = "3 Output/best_step_perf.rds")
+
+```
+
+
+8. Scenario data file prep
+ - keep only hypertensives
+ - merge in country-level data
+    - htn prevalence, auc_gap, countryGDPclass, cascade values
+ - set cascade targets by country-quintile and scenario
+ - generate baseline cascade performance gap measures/tertiles for graphing stratification
+ - join cascade targets and main dataset 
+ - select relevant columns
+ 
+ 
+- load data and filter targets by scenario type
+```{r load perf data}
+
+reverse_gap <- readRDS("3 Output/reverse-gap.rds")
+
+# load Chunk 2 output w/ CVD risk and RR estimates
+data_cvd_rr <- readRDS(file = "3 Output/all-w-RRs.rds")
+# most recent saved dataset of only htns
+
+# terciles of baseline performance
+area3 <- readRDS(file = "3 Output/area-sum-rankings.rds")
+# countryGDPclass
+gdp <- data_cvd_rr %>%
+  select(Country, countryGDPclass) %>%
+  distinct()
+
+covariates <- left_join(area3, gdp)
+
+saveRDS(gdp, "3 Output/gdp.rds")
+saveRDS(covariates, "3 Output/gdp-rank.rds")
+
+# merge in country-level cascade information by quintile in order to estimate additional proportion of individuals who need to be aware and/or treated in each scenario
+# will merge this into main dataset
+
+data_q <- readRDS(file = "3 Output/quintile_cascades.rds") # cascade variables in percent
+
+cascades <- data_q %>%
+  mutate(prop_aware = as.numeric(prop_aware),
+         prop_tx = as.numeric(prop_tx)) %>%
+  filter(!(Country %in% reverse_gap)) %>%
+  left_join(covariates)
+
+saveRDS(cascades, "3 Output/cascades.rds")
+
+# figure out target proportion for each country - ie how many of the UNDIAGNOSED hypertensives need to be sample for each country
+
+## for overall targets
+best_step <- readRDS(file = "3 Output/best_step.rds")
+
+## overall
+# best proportion AWARE
+aware <- best_step %>%
+  filter(cascade_variable == "prop_aware") %>%
+  select(value)
+
+#best proportion on TREATMENT
+tx <- best_step %>%
+  filter(cascade_variable == "prop_tx") %>%
+  select(value)
+
+#"proportions" are in percents in cascade summary
+# input as proportions for sampling
+aware_target <- aware$value/100 # proportion
+tx_target <- tx$value/100 # proportion
+
+## for income-group targets
+best_step_income <- readRDS(file = "3 Output/best_step_income.rds")
+
+## by income-group
+# best proportion AWARE
+aware_income <- best_step_income %>%
+  filter(cascade_variable == "prop_aware") %>%
+  mutate(value = value/100) %>%
+  select(aware_target_income = value) %>%
+  ungroup() %>%
+  select(-cascade_variable)
+
+
+#best proportion on TREATMENT
+tx_income <- best_step_income %>%
+  filter(cascade_variable == "prop_tx") %>%
+  mutate(value = value/100) %>%
+  select(tx_target_income = value) %>%
+  ungroup() %>%
+  select(-cascade_variable)
+
+## for baseline performance targets
+best_step_perf <- readRDS(file = "3 Output/best_step_perf.rds")
+
+## by baseline perf
+# best proportion AWARE
+aware_perf <- best_step_perf %>%
+  filter(cascade_variable == "prop_aware") %>%
+  mutate(value = value/100) %>%
+  select(aware_target_perf = value) %>%
+  ungroup() %>%
+  select(-cascade_variable)
+
+#best proportion on TREATMENT
+tx_perf <- best_step_perf %>%
+  filter(cascade_variable == "prop_tx") %>%
+  mutate(value = value/100) %>%
+  select(tx_target_perf = value) %>%
+    ungroup() %>%
+  select(-cascade_variable)
+
+## sensitivity analysis targets
+# ID best performing quintile in each country for sensitivity analysis targets
+target <- cascades %>%
+  group_by(Country) %>%
+  mutate(top_aware = rank(-prop_aware),
+         top_tx = rank(-prop_tx)) 
+
+# scenario 1 - aware
+target_aware_sens <- target %>%
+  filter(top_aware == 1) %>%
+  mutate(aware_target_sens = prop_aware/100) %>%
+  select(Country, 
+         aware_target_sens) %>%
+  distinct()
+
+# scenario 2 - tx
+target_tx_sens <- target %>%
+  filter(top_tx == 1) %>%
+  mutate(tx_target_sens = prop_tx/100) %>%
+  select(Country, 
+        tx_target_sens) %>%
+  distinct()
+
+## DATASET WITH TARGETS
+#cascades <- readRDS("3 Output/cascades.rds")
+# join targets (in proportion) with cascade dataset
+cascades0 <- cascades %>%
+  mutate(aware_target = aware_target, 
+         tx_target = tx_target) %>%
+  left_join(aware_income) %>%
+  left_join(tx_income) %>%
+  left_join(aware_perf) %>%
+  left_join(tx_perf) %>%
+  left_join(target_aware_sens) %>%
+  left_join(target_tx_sens) %>%
+    mutate(prop_aware = prop_aware/100, # proportions
+         prop_tx = prop_tx/100, # proportions
+         aware_target_rel = prop_aware + (prop_aware*0.5),
+         tx_target_rel = prop_tx + (prop_tx*0.5),
+         aware_target_rel = ifelse(aware_target_rel > 1, 1, aware_target_rel), # over 100% target put at 100%
+         tx_target_rel = ifelse(tx_target_rel > 1, 1, tx_target_rel), # over 100% target put at 100%
+         keep_aware = ifelse(aware_target > prop_aware, 1, 0),
+         keep_tx = ifelse(tx_target > prop_tx, 1, 0),
+         keep_aware_income = ifelse(aware_target_income > prop_aware, 1, 0),
+         keep_tx_income = ifelse(tx_target_income > prop_tx, 1, 0),
+         keep_aware_perf = ifelse(aware_target_perf > prop_aware, 1, 0),
+         keep_tx_perf = ifelse(tx_target_perf > prop_tx, 1, 0),
+         keep_aware_sens = ifelse(aware_target_sens == prop_aware, 0, 1),
+         keep_tx_sens = ifelse(tx_target_sens == prop_tx, 0, 1))
+  
+# save cascades and targets
+saveRDS(cascades0, "3 Output/cascades0.rds")
+
+#### save target values
+saveRDS(aware, "3 Output/aware-target.rds")
+saveRDS(tx, "3 Output/tx-target.rds")
+saveRDS(aware_income, "3 Output/aware-target-income.rds")
+saveRDS(tx_income, "3 Output/tx-target-income.rds")
+saveRDS(aware_perf, "3 Output/aware-target-perf.rds")
+saveRDS(tx_perf, "3 Output/tx-target-perf.rds")
+
+```
+
+read-in targets
+```{r}
+aware<- readRDS("3 Output/aware-target.rds")
+tx<- readRDS("3 Output/tx-target.rds")
+aware_income <- readRDS("3 Output/aware-target-income.rds")
+tx__income <- readRDS("3 Output/tx-target-income.rds")
+aware_perf<- readRDS("3 Output/aware-target-perf.rds")
+tx_income <- readRDS("3 Output/tx-target-perf.rds")
+```
+
+
+-check for which countries the target is BELOW their baseline awareness or tx level (DONE)
+```{r}
+
+cascades0 <- readRDS("3 Output/cascades0.rds")
+
+check_targets <- cascades0 %>%
+  select(Country, wealth_quintile, prop_aware, prop_tx,
+         area_sum_rank, countryGDPclass,
+         aware_target, tx_target,
+         aware_target_income, tx_target_income,
+         aware_target_perf, tx_target_perf,
+         aware_target_sens, tx_target_sens) %>%
+  mutate(keep_aware = ifelse(aware_target > prop_aware, 1, 0),
+         keep_tx = ifelse(tx_target > prop_tx, 1, 0),
+         keep_aware_income = ifelse(aware_target_income > prop_aware, 1, 0),
+         keep_tx_income = ifelse(tx_target_income > prop_tx, 1, 0),
+         keep_aware_perf = ifelse(aware_target_perf > prop_aware, 1, 0),
+         keep_tx_perf = ifelse(tx_target_perf > prop_tx, 1, 0),
+         keep_aware_sens = ifelse(aware_target_sens == prop_aware, 1, 0),
+         keep_tx_sens = ifelse(tx_target_sens == prop_tx, 0, 1))
+
+
+saveRDS(country_targets, "3 Output/country-target-values-scenarios.rds")
+
+```
+
+
+- target setting
+```{r set targets}
+#####SETTING CASCADE TARGETS####
+
+# in percents
+# calculate additional people aware and/or on tx in each scenario for each country-quintile
+# calculate proportion difference/number of additional people required to be sampled (ie made aware or on tx) in each group (ie country, quintile) to reach targets specified above
+cascades2 <- cascades0 %>%
+ # rename(country = Country) %>%
+  mutate(across(c(prop_aware_upp, prop_aware_low, prop_tx_upp, prop_tx_low, prop_control, prop_control_upp, prop_control_low), ~./100)) %>% # get into proportions (not percents)
+  #additional proportion of htn that need to be identified to reach target (target proportion minus proportion aware)
+  #proportion of the undiagnosed that need to be sampled (ratio)
+  #additional proportion of htn on tx (target tx prop minus current tx prop)
+  #additional tx proportion needed divided by the untreated population to get proportion of untreated need to sample from
+        #overall
+  mutate(addl_aware_prop = aware_target-prop_aware, 
+         addl_aware_und = (addl_aware_prop/(1-prop_aware)), 
+         addl_tx_prop = tx_target-prop_tx, 
+         addl_tx_untr = (addl_tx_prop/(1-prop_tx)),
+         # by income group
+         addl_aware_prop_income = aware_target_income-prop_aware, 
+         addl_aware_und_income = (addl_aware_prop_income/(1-prop_aware)), 
+         addl_tx_prop_income = tx_target_income-prop_tx, 
+         addl_tx_untr_income = (addl_tx_prop_income/(1-prop_tx)),
+         # by baseline performance
+         addl_aware_prop_perf = aware_target_perf-prop_aware, 
+         addl_aware_und_perf = (addl_aware_prop_perf/(1-prop_aware)), 
+         addl_tx_prop_perf = tx_target_perf-prop_tx, 
+         addl_tx_untr_perf = (addl_tx_prop_perf/(1-prop_tx)),
+         # sensitivity analysis
+         addl_aware_prop_sens = aware_target_sens-prop_aware, 
+         addl_aware_und_sens = (addl_aware_prop_sens/(1-prop_aware)), 
+         addl_tx_prop_sens = tx_target_sens-prop_tx, 
+         addl_tx_untr_sens = (addl_tx_prop_sens/(1-prop_tx)),
+         # relative increase (50%)
+         addl_aware_prop_rel = aware_target_rel-prop_aware,
+         addl_aware_und_rel = (addl_aware_prop_rel/(1-prop_aware)), 
+         addl_tx_prop_rel = tx_target_rel-prop_tx, 
+         addl_tx_untr_rel = (addl_tx_prop_rel/(1-prop_tx))) 
+
+saveRDS(cascades2, "3 Output/sampling-to-target-values.rds")
+
+#join hypertensives with cascade target country-quintile information
+#country_cascades <- left_join(data_cvd_rr, cascades2) 
+# join cascade target info (prop_aware, prop_tx needed for scenarios)
+#area2<- readRDS(file = "3 Output/area2.rds")
 #join hypertensives with cascade target country-quintile information
 country_cascades <- left_join(data_cvd_rr, cascades2) %>% # join cascade target info (prop_aware, prop_tx needed for scenarios)
-  left_join(cascades3) %>% # join in tx_gap info
   left_join(area2) # join in cascade perf gap info
 
+### SAVE ANALYSIS DATASET ###
 #dataframe with selected columns for scenario runs
 all <- country_cascades %>%
   select(ID,
@@ -610,107 +854,12 @@ all <- country_cascades %>%
          csmoke,
          ccodes,
          cvd_reduction,
-         cvd_risk:addl_tx_untr,
-         tx_gap:auc_gap_rank,
+         cvd_risk:addl_tx_untr_rel,
+         auc_gap_rank,
+         auc_gap,
          mean_htn)
 
 saveRDS(all, file = "3 Output/all.rds")
-
-```
-
-8a sensitivity analysis target calculation
- 
-```{r scenario data prep}
-
-# load Chunk 2 output w/ CVD risk and RR estimates
-data_cvd_rr <- readRDS(file = "3 Output/all-w-RRs.rds")
-# most recent saved dataset of only htns
-
-#####SETTING CASCADE TARGETS####
-
-# merge in country-level cascade information by quintile in order to estimate additional proportion of individuals who need to be aware and/or treated in each scenario
-# will merge this into main dataset
-
-data_q <- readRDS(file = "3 Output/quintile_cascades.rds")
-
-cascades <- data_q %>%
-  mutate(prop_aware = as.numeric(prop_aware),
-         prop_tx = as.numeric(prop_tx))
-rm(data_q)
-
-# ID best performing quintile in each country for sensitivity analysis targets
-target <- cascades %>%
-  group_by(Country) %>%
-  mutate(top_aware = rank(-prop_aware),
-         top_tx = rank(-prop_tx)) 
-# scenario 1 - aware
-target_aware<- target %>%
-  filter(top_aware == 1) %>%
-  select(Country, 
-         prop_aware_target = prop_aware, 
-         top_aware) %>%
-  distinct()
-
-# scenario 2 - tx
-target_tx <- target %>%
-  filter(top_tx == 1) %>%
-  select(Country, 
-         prop_tx_target = prop_tx, 
-         top_tx) %>%
-  distinct()
-
-
-# country specific targets for sensitivity analysis
-targets <- left_join(target_aware, target_tx) %>%
-  select(-top_aware, -top_tx) %>%
-  left_join(cascades) %>%
-  mutate(prop_aware_target = prop_aware_target/100,
-         prop_tx_target = prop_tx_target/100)
-
-# in percents
-# calculate additional people aware and/or on tx in each scenario for each country-quintile
-# calculate proportion difference/number of additional people required to be sampled (ie made aware or on tx) in each group (ie country, quintile) to reach targets specified above
-targets2 <- targets %>%
- # rename(country = Country) %>%
-  mutate(across(prop_aware:prop_control_upp, ~./100)) %>% # get into proportions (not percents)
-  mutate(addl_aware_prop = prop_aware_target-prop_aware, #additional proportion of htn that need to be identified to reach target (target proportion minus proportion aware)
-         addl_aware_und = (addl_aware_prop/(1-prop_aware)), #proportion of the undiagnosed that need to be sampled (ratio)
-          addl_tx_prop = prop_tx_target-prop_tx, #additional proportion of htn on tx (target tx prop minus current tx prop)
-         addl_tx_untr = (addl_tx_prop/(1-prop_tx))) #additional treatment proportion needed divided by the untreated population to get proportion of untreated need to sample from
-
-#join hypertensives with cascade target country-quintile information
-country_cascades_sens <- left_join(data_cvd_rr, targets2) # join cascade target info (prop_aware, prop_tx needed for scenarios)
-
-
-#dataframe with selected columns for scenario runs
-all <- country_cascades_sens %>%
-  select(ID,
-         Country,
-         countryGDPclass, 
-         psu_num, 
-         rural, 
-         stratum_num, 
-         w_bp, 
-         year, 
-         age, 
-         educat, 
-         sex, 
-         wealth_quintile,
-         bp_med, 
-         clin_hypt,
-         sbp,
-         und_hypt, 
-         bpms_hypt, 
-         bpms_hypt_med,
-         bpms_hypt_med_ctl,
-         bmi,
-         csmoke,
-         ccodes,
-         cvd_reduction,
-         cvd_risk:addl_tx_untr,
-         mean_htn)
-
-saveRDS(all, file = "3 Output/all-sensitivity.rds")
 
 ```
 

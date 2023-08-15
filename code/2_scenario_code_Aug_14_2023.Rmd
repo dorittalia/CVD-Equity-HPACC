@@ -1,0 +1,515 @@
+---
+title: "Scenario code - main analysis"
+author: "Dorit Stein"
+date: "6/21/23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+rm(list = ls())
+
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(ggplot2)
+library(readxl)
+library(purrr)
+library(knitr)
+library(srvyr)
+library(survey)
+library(data.table)
+library(furrr)
+
+```
+
+
+###SCENARIOS
+
+# cluster data load
+```{r - input data}
+
+all <- readRDS(file = "/n/holyscratch01/verguet_lab/Everyone/all.rds") %>%
+  mutate(country = Country)
+
+```
+
+# my computer data load
+```{r - input data}
+
+all <- readRDS(file = "3 Output/all.rds") %>%
+  mutate(country = Country)
+
+```
+
+# Prep Scenario Data
+- for country-quintiles that are the target in each scenario version (keep_x == 0), use baseline values as outcomes because they are not increasing their coverage at all (i.e. Q2, Russia, Scenario 1 overall)
+- for scenario 1 across all scenario subtypes, Niger has 0% linkage to tx for Q2, so use baseline values for Q2 for Niger in Scenario 1
+
+```{r}
+# Datasets for each scenario subtype: overall, _income, _perf, _sens
+
+###### Scenario 1
+# scenario 1 - overall
+all_s1 <- all %>%
+  filter(keep_aware == 1) %>%
+  filter(linkage > 0)
+
+#nest by country-wealth_quintile so can run sampling on each dataframe for each country
+all_s1_nest <- all_s1 %>%
+  group_by(country, wealth_quintile) %>%
+  nest() %>%
+  ungroup()
+
+# scenario 1 - income group
+all_s1_income <- all %>%
+  filter(keep_aware_income == 1) %>%
+  filter(linkage > 0) %>%
+  select(-addl_aware_und) %>%
+  rename(addl_aware_und = addl_aware_und_income)
+
+#nest by country-wealth_quintile so can run sampling on each dataframe for each country
+all_s1_nest_income <- all_s1_income %>%
+  group_by(country, wealth_quintile) %>%
+  nest() %>%
+  ungroup()
+
+# scenario 1 - baseline performance
+all_s1_perf <- all %>%
+  filter(keep_aware_perf == 1) %>%
+  filter(linkage > 0) %>%
+  select(-addl_aware_und) %>%
+  rename(addl_aware_und = addl_aware_und_perf)
+
+#nest by country-wealth_quintile so can run sampling on each dataframe for each country
+all_s1_nest_perf<- all_s1_perf %>%
+  group_by(country, wealth_quintile) %>%
+  nest() %>%
+  ungroup()
+
+# scenario 1 - sensitivity
+all_s1_sens <- all %>%
+  filter(keep_aware_sens == 1) %>%
+  filter(linkage > 0) %>%
+  select(-addl_aware_und) %>%
+  rename(addl_aware_und = addl_aware_und_sens)
+
+#nest by country-wealth_quintile so can run sampling on each dataframe for each country
+all_s1_nest_sens <- all_s1_sens %>%
+  group_by(country, wealth_quintile) %>%
+  nest() %>%
+  ungroup()
+
+# scenario 1 - relative increase
+all_s1_rel <- all %>%
+  filter(linkage > 0) %>%
+  select(-addl_aware_und) %>%
+  rename(addl_aware_und = addl_aware_und_rel)
+
+#nest by country-wealth_quintile so can run sampling on each dataframe for each country
+all_s1_nest_rel <- all_s1_rel %>%
+  group_by(country, wealth_quintile) %>%
+  nest() %>%
+  ungroup()
+
+# remove unnested datasets
+rm(all_s1, all_s1_income, all_s1_perf, all_s1_sens, all_s1_rel)
+
+###### Scenario 2
+# scenario 2 - overall
+all_s2 <- all %>%
+  filter(keep_tx == 1) 
+
+#nest into country-quintile dataframes
+all_s2_nest <- all_s2 %>%
+  group_by(country, wealth_quintile) %>%
+  nest() %>%
+  ungroup()
+
+# scenario 2 - income
+all_s2_income <- all %>%
+  filter(keep_tx_income == 1) %>%
+  select(-addl_tx_untr) %>%
+  rename(addl_tx_untr = addl_tx_untr_income) 
+
+#nest into country-quintile dataframes
+all_s2_nest_income <- all_s2_income %>%
+  group_by(country, wealth_quintile) %>%
+  nest() %>%
+  ungroup()
+
+# scenario 2 - baseline performance
+all_s2_perf <- all %>%
+  filter(keep_tx_perf == 1) %>%
+  select(-addl_tx_untr) %>%
+  rename(addl_tx_untr = addl_tx_untr_perf) 
+
+#nest into country-quintile dataframes
+all_s2_nest_perf <- all_s2_perf %>%
+  group_by(country, wealth_quintile) %>%
+  nest() %>%
+  ungroup()
+
+# scenario 2 - sensitivity analysis
+all_s2_sens <- all %>%
+  filter(keep_tx_sens == 1) %>%
+  select(-addl_tx_untr) %>%
+  rename(addl_tx_untr = addl_tx_untr_sens) 
+
+#nest into country-quintile dataframes
+all_s2_nest_sens <- all_s2_sens %>%
+  group_by(country, wealth_quintile) %>%
+  nest() %>%
+  ungroup()
+
+# scenario 2 - relative increase
+all_s2_rel <- all %>%
+  select(-addl_tx_untr) %>%
+  rename(addl_tx_untr = addl_tx_untr_rel) 
+
+#nest into country-quintile dataframes
+all_s2_nest_rel <- all_s2_rel %>%
+  group_by(country, wealth_quintile) %>%
+  nest() %>%
+  ungroup()
+
+# remove unnested datasets
+rm(all_s2, all_s2_income, all_s2_perf, all_s2_sens, all_s2_rel)
+
+```
+
+
+# Scenario 1 + 2
+ - do all the sampling/treating/summarizing for one country-quintile (within one function)
+ - then map that function on the nested dataframe
+
+Scenario Functions
+
+```{r - new scenario coding - scenario1}
+
+# alg is dataframe for 1 country-quintile
+
+scenario1 <- function(alg) { # input dataset should include aware/unaware, filter in the fxn below
+  
+  #set.seed(1234)
+  
+  prop_sample <- alg$addl_aware_und[1]
+  link_rx <- alg$linkage[1]
+  
+  # filter those unaware of hypertensive status
+  # sample from unaware to be put on treatment
+  alg1 <- alg %>%
+    filter(bpms_hypt != 1) %>% # filter unaware
+    slice_sample(prop = prop_sample) |>
+    slice_sample(prop = link_rx) |>
+    mutate(on_aware_tx = 1) %>%
+    select(ID, on_aware_tx)
+  
+  alg_RR <- alg %>% 
+    mutate(on_aware_tx = if_else(ID %in% alg1$ID, 1, 0)) |>
+    mutate(cvd_risk_s1 = ifelse(on_aware_tx == 1, cvd_risk*cvd_reduction, cvd_risk), 
+           # assign new CVD risk for those on tx
+           risk_d_s1 = cvd_risk-cvd_risk_s1,
+           # NEW for relative change estimate
+           rel_change_s1 = abs((cvd_risk_s1-cvd_risk)/cvd_risk)) 
+           # for each individual, take difference from scenario 1 risk and baseline risk
+   
+   #set survey weights
+   scenario1_alg <- alg_RR %>% 
+     as_survey_design(
+       stratum = stratum_num,
+       ids = c(psu_num),
+       weights = w_bp)
+   
+   #weighted mean of CVD risk in scenario 1
+   mean_risk_s1 <- scenario1_alg %>%
+     summarize(mean_cvd_risk_s1 = survey_mean(cvd_risk_s1),
+               mean_risk_d_s1 = survey_mean(risk_d_s1),
+               mean_rel_change_s1 = survey_mean(rel_change_s1))
+   
+   s1_rnorm <- with(mean_risk_s1,
+        tibble(mean_cvd_risk_s1_rnorm = rnorm(1000,mean_cvd_risk_s1, mean_cvd_risk_s1_se),
+               mean_risk_d_s1_rnorm = rnorm(1000, mean_risk_d_s1, mean_risk_d_s1_se),
+               mean_rel_change_s1_rnorm = rnorm(1000, mean_rel_change_s1, mean_rel_change_s1_se)))
+
+  s1_rnorm
+     
+}
+
+####S1####
+# replicate scenario 1 function
+
+replicate_s1 <- function(alg) {
+  
+  df <- replicate(n = 1000, scenario1(alg), simplify = F)
+  
+  df2 <- map_dfr(df, as.list) |>
+    # pull out mean and 95th UI 
+    pivot_longer(cols = mean_cvd_risk_s1_rnorm:mean_rel_change_s1_rnorm) |>
+    group_by(name) |> 
+    arrange(value) |> 
+    mutate(rank = rank(value, ties.method = 'first'),
+           mean = as.numeric(mean(value)),
+           interval = ifelse(rank == 25000, "lower", "upper")) |> 
+    filter(rank == 25000 | rank == 975000) |>
+    ungroup() |>
+    select(-rank) |>
+    pivot_wider(names_from = interval, values_from = value)
+    
+    df2
+  
+}
+
+####### Scenario 2 coding
+
+scenario2 <- function(alg) {
+  
+  #set.seed(1234)
+  
+  prop_sample <- alg$addl_tx_untr[1]
+  
+  # sample from untreated to be put on treatment
+  alg2 <- alg %>%
+    filter(bpms_hypt_med != 1) %>% # filter untreated only
+    slice_sample(prop = prop_sample) |>
+                 #, weight_by = w_bp) %>%
+    mutate(slice_tx = 1) %>%
+    select(ID, slice_tx)
+  
+  alg_RR_2 <- alg %>% 
+    mutate(slice_tx = if_else(ID %in% alg2$ID, 1, 0)) |>
+    mutate(cvd_risk_s2 = ifelse(slice_tx == 1, cvd_risk*cvd_reduction, cvd_risk),
+           # assign new CVD risk for those on tx
+           risk_d_s2 = cvd_risk-cvd_risk_s2,
+           # NEW for relative change estimate
+           rel_change_s2 = abs((cvd_risk_s2-cvd_risk)/cvd_risk)) 
+            # for each individual, take difference from scenario 2 risk and baseline risk
+   
+  #set survey weights
+   scenario2_alg <- alg_RR_2 %>%
+     as_survey_design(
+       stratum = stratum_num,
+       ids = c(psu_num),
+       weights = w_bp)
+  
+  #weighted mean of CVD risk in scenario 2
+   mean_risk_s2 <- scenario2_alg %>%
+     summarize(
+       mean_cvd_risk_s2 = survey_mean(cvd_risk_s2),
+       mean_risk_d_s2 = survey_mean(risk_d_s2),
+       mean_rel_change_s2 = survey_mean(rel_change_s2))
+  
+     s2_rnorm <- with(mean_risk_s2,
+        tibble(mean_cvd_risk_s2_rnorm = rnorm(1000,mean_cvd_risk_s2, mean_cvd_risk_s2_se),
+               mean_risk_d_s2_rnorm = rnorm(1000, mean_risk_d_s2, mean_risk_d_s2_se),
+               mean_rel_change_s2_rnorm = rnorm(1000, mean_rel_change_s2, mean_rel_change_s2_se)))
+
+  s2_rnorm
+  
+}
+
+####S2####
+# replicate scenario 2 function
+
+replicate_s2 <- function(alg) {
+  
+  df <- replicate(n = 1000, scenario2(alg), simplify = F)
+  
+  df2 <- # flatten list into tibbles
+    map_dfr(df, as.list) |>
+    # pull out mean and 95th UI 
+    pivot_longer(cols = mean_cvd_risk_s2_rnorm:mean_rel_change_s2_rnorm) |>
+    group_by(name) |> 
+    arrange(value) |> 
+    mutate(rank = rank(value, ties.method = 'first'),
+           mean = as.numeric(mean(value)),
+    interval = ifelse(rank == 25000, "lower", "upper")) |> 
+            filter(rank == 25000 | rank == 975000) |>
+    ungroup() |>
+    select(-rank) |>
+    pivot_wider(names_from = interval, values_from = value)
+
+  df2
+  
+}
+
+```
+
+# Run Scenarios
+
+```{r}
+# map scenarios onto the nested dataframe for each country-quintile
+
+# OVERALL - s1
+plan(multisession)
+system.time({
+  
+s1 <- all_s1_nest |>
+  mutate(s1_output = future_map(data, 
+                         ~replicate_s1(.),
+                         .options = furrr_options(seed=123L),
+                         .progress = TRUE)) |>
+  select(-data)
+})
+
+saveRDS(s1, "/n/holyscratch01/verguet_lab/Everyone/s1-overall.rds")
+
+rm(s1)
+
+# OVERALL - s2
+# map scenarios onto the nested dataframe for each country-quintile
+plan(multisession) 
+system.time({
+  
+s2 <- all_s2_nest |>
+  mutate(s2_output = future_map(data, 
+                         ~replicate_s2(.),
+                         .options = furrr_options(seed=123L),
+                         .progress = TRUE)) |>
+        select(-data)
+})
+
+# save clean version
+saveRDS(s2, "/n/holyscratch01/verguet_lab/Everyone/s2-overall.rds")
+
+rm(s2)
+
+# INCOME GROUP - s1
+plan(multisession)
+system.time({
+  
+s1 <- all_s1_nest_income |>
+  mutate(s1_output = future_map(data, 
+                         ~replicate_s1(.),
+                         .options = furrr_options(seed=123L),
+                         .progress = TRUE)) |>
+  select(-data)
+})
+
+saveRDS(s1, "/n/holyscratch01/verguet_lab/Everyone/s1-income.rds")
+
+rm(s1)
+
+# INCOME GROUP - s2
+# map scenarios onto the nested dataframe for each country-quintile
+plan(multisession) 
+system.time({
+  
+s2 <- all_s2_nest_income |>
+  mutate(s2_output = future_map(data, 
+                         ~replicate_s2(.),
+                         .options = furrr_options(seed=123L),
+                         .progress = TRUE)) |>
+        select(-data)
+})
+
+# save clean version
+saveRDS(s2, "/n/holyscratch01/verguet_lab/Everyone/s2-income.rds")
+
+rm(s2)
+
+# PERFORMANCE - s1
+plan(multisession)
+system.time({
+  
+s1 <- all_s1_nest_perf |>
+  mutate(s1_output = future_map(data, 
+                         ~replicate_s1(.),
+                         .options = furrr_options(seed=123L),
+                         .progress = TRUE)) |>
+  select(-data)
+})
+
+saveRDS(s1, "/n/holyscratch01/verguet_lab/Everyone/s1-perf.rds")
+
+rm(s1)
+
+# PERFORMANCE - s2
+# map scenarios onto the nested dataframe for each country-quintile
+plan(multisession) 
+system.time({
+  
+s2 <- all_s2_nest_perf |>
+  mutate(s2_output = future_map(data, 
+                         ~replicate_s2(.),
+                         .options = furrr_options(seed=123L),
+                         .progress = TRUE)) |>
+        select(-data)
+})
+
+# save clean version
+saveRDS(s2, "/n/holyscratch01/verguet_lab/Everyone/s2-perf.rds")
+
+rm(s2)
+
+# SENSITIVITY - s1
+plan(multisession)
+system.time({
+  
+s1 <- all_s1_nest_sens |>
+  mutate(s1_output = future_map(data, 
+                         ~replicate_s1(.),
+                         .options = furrr_options(seed=123L),
+                         .progress = TRUE)) |>
+  select(-data)
+})
+
+saveRDS(s1, "/n/holyscratch01/verguet_lab/Everyone/s1-sens.rds")
+
+rm(s1)
+
+# SENSITIVITY - s2
+# map scenarios onto the nested dataframe for each country-quintile
+plan(multisession) 
+system.time({
+  
+s2 <- all_s2_nest_sens |>
+  mutate(s2_output = future_map(data, 
+                         ~replicate_s2(.),
+                         .options = furrr_options(seed=123L),
+                         .progress = TRUE)) |>
+        select(-data)
+})
+
+# save clean version
+saveRDS(s2, "/n/holyscratch01/verguet_lab/Everyone/s2-sens.rds")
+
+rm(s2)
+
+# RELATIVE - s1
+plan(multisession)
+system.time({
+  
+s1 <- all_s1_nest_rel |>
+  mutate(s1_output = future_map(data, 
+                         ~replicate_s1(.),
+                         .options = furrr_options(seed=123L),
+                         .progress = TRUE)) |>
+  select(-data)
+})
+
+saveRDS(s1, "/n/holyscratch01/verguet_lab/Everyone/s1-rel.rds")
+
+rm(s1)
+
+# RELATIVE - s2
+# map scenarios onto the nested dataframe for each country-quintile
+plan(multisession) 
+system.time({
+  
+s2 <- all_s2_nest_rel |>
+  mutate(s2_output = future_map(data, 
+                         ~replicate_s2(.),
+                         .options = furrr_options(seed=123L),
+                         .progress = TRUE)) |>
+        select(-data)
+})
+
+# save clean version
+saveRDS(s2, "/n/holyscratch01/verguet_lab/Everyone/s2-rel.rds")
+
+rm(s2)
+
+```
+
