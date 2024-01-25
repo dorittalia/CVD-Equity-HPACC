@@ -773,7 +773,7 @@ check_targets <- cascades0 %>%
          keep_tx_sens = ifelse(tx_target_sens == prop_tx, 0, 1))
 
 
-saveRDS(country_targets, "3 Output/country-target-values-scenarios.rds")
+saveRDS(check_targets, "3 Output/country-target-values-scenarios.rds")
 
 ```
 

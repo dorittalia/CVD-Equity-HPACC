@@ -1,8 +1,14 @@
 ---
 title: 'Supplementary Information'
-subtitle: 'Improving hypertension care cascades and cardiovascular disease inequities:'
-author: 'a modelling study based on nationally representative surveys from 44 low- and middle-income countries'
-date: 'Dorit Talia Stein, Marissa B. Reitsma, Pascal Geldsetzer, Kokou Agoudavi, Krishna Kumar Aryal, Silver Bahendeka, Luisa C C Brant, Farshad Farzadfar, Mongal Singh Gurung, David Guwatudde, Yèssito Corine Nadège Houehanou, Deborah Carvalho Malta, João Soares Martins, Sahar Saeedi Moghaddam, Kibachio Joseph Mwangi, Bolormaa Norov, Lela Sturua, Lindiwe Tsabedze, Zhaxybay Zhumadilov, Till Bärnighausen, Justine I. Davies, David Flood, Maja E. Marcus, Michaela Theilmann, Sebastian Vollmer, Jennifer Manne-Goehler, Rifat Atun, Nikkil Sudharsanan, Stéphane Verguet'
+subtitle: |
+  Hypertension care cascades and reducing inequities in cardiovascular disease in low- and middle-income countries
+author: |
+  Dorit Talia Stein, Marissa B. Reitsma, Pascal Geldsetzer, Kokou Agoudavi, Krishna Kumar Aryal, Silver Bahendeka,     
+  Luisa C C Brant, Farshad Farzadfar, Mongal Singh Gurung, David Guwatudde, Yessito Corine Nadège Houehanou,   
+  Deborah Carvalho Malta, João Soares Martins, Sahar Saeedi Moghaddam, Kibachio Joseph Mwangi, Bolormaa Norov,   
+  Lela Sturua, Zhaxybay Zhumadilov, Till Bärnighausen, Justine I. Davies, David Flood,   
+  Maja E. Marcus, Michaela Theilmann, Sebastian Vollmer, Jennifer Manne-Goehler, Rifat Atun, Nikkil Sudharsanan,   
+  Stéphane Verguet
 output:
   pdf_document:
     toc: yes
@@ -18,8 +24,11 @@ header-includes: \usepackage{helvet} \renewcommand\familydefault{\sfdefault}
 include-before: '`\newpage{}`{=latex}'
 ---
 
+
 ```{r include = F, echo = FALSE, message = FALSE}
 knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+
+options(scipen = 1, digits = 2) #set to two decimal 
 
 rm(list = ls())
 
@@ -156,7 +165,7 @@ kbl(countries,
 
 \bigskip
 
-### Supplementary Table `r count<- count+1; count`. Mean (95% CI) proportion of people living with hypertension aware of their diagnosis, on treatment, and with controlled hypertension by country and wealth quintile
+### Supplementary Table `r count<- count+1; count`. Mean (95% confidence interval) proportion of people living with hypertension aware of their diagnosis, on treatment, and with controlled hypertension by country and wealth quintile
 
 ```{r echo = FALSE, include = FALSE}
 
@@ -167,9 +176,12 @@ cascades$cascade_variable <- factor(cascades$cascade_variable,
 
 cascade_table <- cascades %>% 
   arrange(Country, wealth_quintile) %>%
-  mutate(across(c(value, lower, upper), ~round(.,1))) %>%
+  mutate(across(c(value, lower, upper), ~sprintf("%.1f", round(., 1)))) %>%
+                #  round(.,1))) %>%
   ungroup() %>%
-  mutate(bounds = ifelse(is.na(lower), value, paste0(value, " ", "(", lower, ",", upper, ")"))) %>%
+  mutate(bounds = ifelse(is.na(lower), 
+                         value, 
+                         paste0(value, " ", "(", lower, ",", upper, ")"))) %>%
   dplyr::select(Country = Country, 
          'Cascade Step' = cascade_variable, 
          "Wealth Quintile" = wealth_quintile, 
@@ -204,13 +216,15 @@ kbl(cascade_table2,
 
 \newpage
 
-### Supplementary Table `r count<- count+1; count`. Mean (95% CI) proportion of people living with hypertension aware of their diagnosis, on treatment, and with controlled hypertension by wealth quintile and country-level income group
+### Supplementary Table `r count<- count+1; count`. Mean (95% confidence interval) proportion of people living with hypertension aware of their diagnosis, on treatment, and with controlled hypertension by wealth quintile and country-level income group
 
 ```{r echo = F}
 
 cascade_table <- readRDS("3 Output/cascade-graph-country-income-group.rds") %>%
   filter(!(cascade_variable == "Hypertensives")) %>%
-  mutate(across(c(value, lower, upper), ~round(.,1))) %>%
+  mutate(across(c(value, lower, upper), 
+                ~sprintf("%.1f", round(., 1)))) %>%
+                #~round(.,1))) %>%
   arrange(countryGDPclass, wealth_quintile, cascade_variable)%>%
   mutate('Mean (95% CI)' = paste0(value, " ", "(", lower, ", ", upper, ")")) %>%
   select('World Bank Income Group' = countryGDPclass, 
@@ -231,7 +245,7 @@ kbl(cascade_table,
 
 \newpage
 
-### Supplementary Table `r count<- count+1; count`. Ranked gap in hypertension care cascade performance comparing highest (Q5) and lowest (Q1) wealth quintiles at baseline by country ('baseline cascade gap')
+### Supplementary Table `r count<- count+1; count`. Ranked gap in hypertension care cascade performance comparing top (Q5) and bottom (Q1) wealth quintiles at baseline by country ('baseline cascade gap')
 
 ```{r echo = FALSE}
 
@@ -267,7 +281,7 @@ kbl(auc_table,
   footnote(general_title = "Note.", 
            footnote_as_chunk = TRUE,
            threeparttable = TRUE,
-           general = "Performance gap was calculated by taking the difference in the area under the cascade between the highest and lowest wealth quintiles in each country. Countries were sorted by the performance gap and split in terciles representing the top, middle, and bottom third across countries. Tercile 1 corresponds to the lowest ranking countries while Tercile 3 is the highest ranking countries (i.e. countries with the largest difference in area under the cascades between the lowest and highest wealth quintiles).")
+           general = "Performance gap was calculated by taking the difference in the area under the cascade between the top and bottom wealth quintiles in each country. Countries were sorted by the performance gap and split in terciles representing the top, middle, and bottom third across countries. Tercile 1 corresponds to the lowest ranking countries while Tercile 3 is the highest ranking countries (i.e. countries with the largest difference in area under the cascades between the bottom and top wealth quintiles).")
 
 
 ```
@@ -296,7 +310,9 @@ diagnosis <- all %>%
             aware_target2 = mean(aware_target),
             resulting_tx = aware_target2*linkage) %>%
   mutate(across(c(linkage, aware_target2, resulting_tx), ~.*100)) %>%
-  mutate(across(c(linkage, aware_target2, resulting_tx), ~round(.,1))) %>%
+  mutate(across(c(linkage, aware_target2, resulting_tx), 
+                ~sprintf("%.1f", round(., 1)))) %>%
+                #~round(.,1))) %>%
   arrange(Country, wealth_quintile) %>%
   pivot_longer(linkage:resulting_tx, names_to = "Variable") %>%
   pivot_wider(names_from = wealth_quintile, values_from = value) %>%
@@ -312,6 +328,8 @@ kbl(diagnosis,
       latex_options = c("striped", "repeat_header", "scale_down"),
       stripe_color = "gray!15")
 
+#write.csv(diagnosis, "3 Output/suppl-5-diagnosis-link-tx.csv")
+
 ```
 
 \newpage
@@ -321,8 +339,9 @@ kbl(diagnosis,
 ```{r echo = F}
 targets_perf <- all %>%
   select(area_sum_rank, aware_target_perf, tx_target_perf) %>%
-  mutate(aware_target_perf = round(aware_target_perf*100, 1),
-         tx_target_perf = round(tx_target_perf*100, 1)) %>%
+  mutate(aware_target_perf = sprintf("%.1f", round(aware_target_perf*100, 1)),
+         #~sprintf("%.1f", round(., 1)))) %>%
+         tx_target_perf = sprintf("%.1f", round(tx_target_perf*100, 1))) %>%
   distinct() %>%
   arrange(area_sum_rank) %>%
   mutate(area_sum_rank = factor(area_sum_rank,
@@ -349,8 +368,8 @@ targets_rel <- all %>%
   select(Country, wealth_quintile, aware_target_rel, tx_target_rel) %>%
   distinct() %>%
   arrange(Country, wealth_quintile) %>%
-  mutate(aware_target_rel = round(aware_target_rel*100, 1),
-         tx_target_rel = round(tx_target_rel*100, 1)) %>%
+  mutate(aware_target_rel = sprintf("%.1f", round(aware_target_rel*100, 1)),
+         tx_target_rel = sprintf("%.1f", round(tx_target_rel*100, 1))) %>%
   pivot_longer(aware_target_rel:tx_target_rel, names_to = "Scenario") %>%
   pivot_wider(names_from = wealth_quintile, values_from = value) %>%
   mutate(Scenario = case_when(Scenario == "aware_target_rel" ~ "Diagnosis scenario target (%)",
@@ -373,8 +392,8 @@ targets_sens <- all %>%
   select(Country, aware_target_sens, tx_target_sens) %>%
   distinct() %>%
   arrange(Country) %>%
-  mutate(aware_target_sens = round(aware_target_sens*100, 1),
-         tx_target_sens = round(tx_target_sens*100, 1)) %>%
+  mutate(aware_target_sens = sprintf("%.1f", round(aware_target_sens*100, 1)),
+         tx_target_sens = sprintf("%.1f", round(tx_target_sens*100, 1))) %>%
   rename("Diagnosis scenario target (%)" = aware_target_sens, 
          "Treatment scenario target (%)" = tx_target_sens)
 
@@ -420,7 +439,7 @@ kbl(edu_targets,
 cvd_table <- mean_risk %>% 
   filter(scenario_type == "baseline" | scenario_type == "overall") %>%
   arrange(country, scenario, wealth_quintile) %>%
-  mutate(across(c(mean, lower, upper), ~round(.,1))) %>%
+  mutate(across(c(mean, lower, upper), ~sprintf("%.1f", round(.,1)))) %>%
   select(-scenario_type) %>%
   ungroup() %>%
   mutate(bounds = ifelse(is.na(lower), mean, paste0(mean, " ", "(", lower, ",", upper, ")"))) %>%
@@ -448,12 +467,16 @@ kbl(cvd_table2,
     longtable = TRUE) %>%
   kable_styling(position = "left",
       latex_options = c("striped", "repeat_header", "scale_down"),
-      stripe_color = "gray!15") 
+      stripe_color = "gray!15") %>%
+  footnote(general_title = "Note.", 
+           footnote_as_chunk = TRUE,
+           threeparttable = TRUE,
+           general = "95% confidence intervals are presented for the Baseline scenario. 95% uncertainty intervals are presented for the Diagnosis and Treatment scenario values.")
 ```
 
 \newpage
 
-### Supplementary Table `r count<- count+1; count`. Absolute (percentage point) difference in mean 10-year cardiovascular disease risk comparing the lowest (Q1) and highest (Q5) wealth quintiles by country and modelled scenario, either Baseline, Diagnosis or Treatment scenario
+### Supplementary Table `r count<- count+1; count`. Absolute (percentage point) difference in mean 10-year cardiovascular disease risk comparing the bottom (Q1) and top (Q5) wealth quintiles by country and modelled scenario, either Baseline, Diagnosis or Treatment scenario
 
 ```{r echo = FALSE}
 
@@ -469,9 +492,9 @@ difference_sens <- readRDS("3 Output/difference-cvd-risk-sens.rds")
 
 diff_table <- difference_overall %>%
   filter(scenario_type == "overall" | scenario_type == "baseline") %>%
-  mutate(difference1_5 = round(difference1_5, 2)) %>%
+  mutate(difference1_5 = sprintf("%.1f", round(difference1_5, 2))) %>%
   select(Country = country, Scenario = scenario, 
-         "Absolute (percenage point) difference in mean CVD risk (Q1-Q5)" = difference1_5) %>%
+         "Absolute (percentage point) difference in mean CVD risk (Q1-Q5)" = difference1_5) %>%
   arrange(Country, Scenario)
 
 kbl(diff_table,
@@ -496,7 +519,7 @@ kbl(diff_table,
 abs_table <- abs %>% 
   filter(scenario_type == "overall") %>%
   arrange(country, name, wealth_quintile) %>%
-  mutate(across(c(mean, lower, upper), ~round(.,1))) %>%
+  mutate(across(c(mean, lower, upper), ~sprintf("%.1f", round(.,1)))) %>%
   ungroup() %>%
   mutate(bounds = paste0(mean, " ", "(", lower, ",", upper, ")")) %>%
   dplyr::select(Country = country, 
@@ -526,16 +549,16 @@ kbl(abs_table2,
 
 \newpage
 
-### Supplementary Table `r count<- count+1; count`. Mean relative decline (%) in CVD risk compared to baseline by country, wealth quintile, and scenario
+### Supplementary Table `r count<- count+1; count`. Mean (95% uncertainty interval) relative decline (%) in CVD risk compared to baseline by country, wealth quintile, and scenario
 
 ```{r echo = FALSE}
 
 rel_table <- rel %>% 
   filter(scenario_type == "overall") %>%
   arrange(country, name, wealth_quintile) %>%
-  mutate(across(c(mean, lower, upper), ~round(.,1))) %>%
+  mutate(across(c(mean, lower, upper), ~sprintf("%.1f", round(.,1)))) %>%
   ungroup() %>%
-  mutate(bounds = paste0(mean, " ", "(", upper, ",", lower, ")")) %>% # with rel decline, upper bound (of mean CVD) is actually lowest value
+  mutate(bounds = paste0(mean, " ", "(", lower, ",", upper, ")")) %>% # with rel decline, upper bound (of mean CVD) is actually lowest value
   dplyr::select(Country = country, 
          Scenario = scenario, 
          "Wealth Quintile" = wealth_quintile, 
@@ -581,7 +604,7 @@ by_inequity_rate <- readRDS("3 Output/by-inequity-rate.rds")
 ```{r echo = F}
 
 gap_table1 <- by_inequity_rate %>%
-  mutate(averted_rate = round(averted_rate,1)) %>%
+  mutate(averted_rate = sprintf("%.1f", round(averted_rate,1))) %>%
   filter(scenario_type == "overall") %>%
   select(auc_gap_rank, wealth_quintile, scenario, averted_rate) %>%
   arrange(auc_gap_rank, wealth_quintile, scenario) %>%
@@ -610,7 +633,7 @@ kbl(gap_table1,
 gap_table2 <- by_inequity_prop %>%
   ungroup() %>%
   filter(scenario_type == "overall") %>%
-  mutate(prop_cases = round(prop_cases*100,1)) %>%
+  mutate(prop_cases = sprintf("%.1f", round(prop_cases*100,1))) %>%
   select(auc_gap_rank, wealth_quintile, scenario, prop_cases) %>%
   arrange(auc_gap_rank, wealth_quintile, scenario) %>%
   pivot_wider(names_from = wealth_quintile, values_from = prop_cases) %>%
@@ -641,7 +664,7 @@ kbl(gap_table2,
 ```{r echo = F}
 
 region_table1 <- by_region_rate %>%
-  mutate(averted_rate = round(averted_rate,1)) %>%
+  mutate(averted_rate = sprintf("%.1f", round(averted_rate,1))) %>%
   filter(scenario_type == "overall") %>%
   select(WHO_region, wealth_quintile, scenario, averted_rate) %>%
   arrange(WHO_region, wealth_quintile, scenario) %>%
@@ -670,7 +693,7 @@ kbl(region_table1,
 region_table2 <- by_region_prop %>%
   ungroup() %>%
   filter(scenario_type == "overall") %>%
-  mutate(prop_cases = round(prop_cases*100,1)) %>%
+  mutate(prop_cases = sprintf("%.1f", round(prop_cases*100,1))) %>%
   select(WHO_region, wealth_quintile, scenario, prop_cases) %>%
   arrange(WHO_region, wealth_quintile, scenario) %>%
   pivot_wider(names_from = wealth_quintile, values_from = prop_cases) %>%
@@ -704,7 +727,7 @@ cvd_table_sens <- function(scenario_type_name) {
 cvd_table_sens <- mean_risk %>% 
   filter(scenario_type == scenario_type_name) %>%
   arrange(country, scenario, wealth_quintile) %>%
-  mutate(across(c(mean, lower, upper), ~round(.,1))) %>%
+  mutate(across(c(mean, lower, upper), ~sprintf("%.1f", round(.,1)))) %>%
   select(-scenario_type) %>%
   ungroup() %>%
   mutate(bounds = ifelse(is.na(lower), mean, paste0(mean, " ", "(", lower, ",", upper, ")"))) %>%
@@ -747,9 +770,9 @@ rel_table_sens <- function(scenario_type_name) {
 rel_table_sens <- rel %>% 
   filter(scenario_type == "overall") %>%
   arrange(country, name, wealth_quintile) %>%
-  mutate(across(c(mean, lower, upper), ~round(.,1))) %>%
+  mutate(across(c(mean, lower, upper), ~sprintf("%.1f", round(.,1)))) %>%
   ungroup() %>%
-  mutate(bounds = paste0(mean, " ", "(", upper, ",", lower, ")")) %>% # with rel decline, upper bound (of mean CVD) is actually lowest value
+  mutate(bounds = paste0(mean, " ", "(", lower, ",", upper, ")")) %>% # with rel decline, upper bound (of mean CVD) is actually lowest value
   dplyr::select(Country = country, 
          Scenario = scenario, 
          "Wealth Quintile" = wealth_quintile, 
@@ -774,7 +797,7 @@ abs_table_sens <- function(scenario_type_name) {
   abs_table_sens <- abs %>% 
   filter(scenario_type == scenario_type_name) %>%
   arrange(country, name, wealth_quintile) %>%
-  mutate(across(c(mean, lower, upper), ~round(.,1))) %>%
+  mutate(across(c(mean, lower, upper), ~sprintf("%.1f", round(.,1)))) %>%
   ungroup() %>%
   mutate(bounds = paste0(mean, " ", "(", lower, ",", upper, ")")) %>%
   dplyr::select(Country = country, 
@@ -802,9 +825,9 @@ diff_table_sens <- function(difference, scenario_type_name){
   
 diff_table <- difference %>%
   #filter(scenario_type == scenario_type_name | scenario_type == "baseline") %>%
-  mutate(difference1_5 = round(difference1_5, 2)) %>%
+  mutate(difference1_5 = sprintf("%.1f", round(difference1_5, 2))) %>%
   select(Country = country, Scenario = scenario, 
-         "Absolute (percenage point) difference in mean CVD risk (Q1-Q5)" = difference1_5) %>%
+         "Absolute (percentage point) difference in mean CVD risk (Q1-Q5)" = difference1_5) %>%
   arrange(Country, Scenario)
 
 }
@@ -820,7 +843,7 @@ diff_table_sens <- diff_table_sens(difference_sens, "sens")
 
 \bigskip
 
-#### Supplementary Table `r count<- count+1; count`. Performance-based targets sensitivity analysis: Mean (95% confidence/uncertainty interval) 10-year CVD risk by country and wealth quintile in Baseline, Diagnosis, and Treatment scenarios
+#### Supplementary Table `r count<- count+1; count`. Performance-based targets sensitivity analysis: Mean (95% uncertainty interval) 10-year CVD risk by country and wealth quintile in Diagnosis and Treatment scenarios
 
 
 ```{r echo = FALSE}
@@ -834,7 +857,7 @@ kbl(cvd_perf,
 
 \newpage
 
-#### Supplementary Table `r count<- count+1; count`. Performance-based targets sensitivity analysis: Absolute (percentage point) difference in mean 10-year cardiovascular disease risk comparing the lowest (Q1) and highest (Q5) wealth quintiles by country and modelled scenario, either Baseline, Diagnosis or Treatment scenario
+#### Supplementary Table `r count<- count+1; count`. Performance-based targets sensitivity analysis: Absolute (percentage point) difference in mean 10-year cardiovascular disease risk comparing the bottom (Q1) and top (Q5) wealth quintiles by country and modelled scenario, either Baseline, Diagnosis or Treatment scenario
 
 ```{r echo = FALSE}
 kbl(diff_table_perf,
@@ -849,7 +872,7 @@ kbl(diff_table_perf,
 
 \newpage
 
-#### Supplementary Table `r count<- count+1; count`. Performance-based targets sensitivity analysis: Mean difference (95% Uncertainty Interval) in CVD cases per 1,000 people living with hypertension compared to baseline by country, wealth quintile, and scenario
+#### Supplementary Table `r count<- count+1; count`. Performance-based targets sensitivity analysis: Mean difference (95% uncertainty interval) in CVD cases per 1,000 people living with hypertension compared to baseline by country, wealth quintile, and scenario
 
 ```{r echo = FALSE}
 
@@ -866,7 +889,7 @@ kbl(abs_table_perf,
 
 \newpage
 
-#### Supplementary Table `r count<- count+1; count`. Performance-based targets sensitivity analysis: Mean relative decline (%) in CVD risk compared to baseline by country, wealth quintile, and scenario
+#### Supplementary Table `r count<- count+1; count`. Performance-based targets sensitivity analysis: Mean (95% uncertainty interval) relative decline (%) in CVD risk compared to baseline by country, wealth quintile, and scenario
 
 ```{r echo = FALSE}
 kbl(rel_table_perf,
@@ -880,7 +903,7 @@ kbl(rel_table_perf,
 
 \newpage
 
-#### Supplementary Table `r count<- count+1; count`. Relative increase targets sensitivity analysis: Mean (95% confidence/uncertainty interval) 10-year CVD risk by country and wealth quintile in Baseline, Diagnosis, and Treatment scenarios
+#### Supplementary Table `r count<- count+1; count`. Relative increase targets sensitivity analysis: Mean (95% uncertainty interval) 10-year CVD risk by country and wealth quintile in Diagnosis and Treatment scenarios
 
 ```{r echo = FALSE}
 kbl(cvd_rel,
@@ -893,7 +916,7 @@ kbl(cvd_rel,
 
 \newpage
 
-#### Supplementary Table `r count<- count+1; count`. Relative increase targets sensitivity analysis: Absolute (percentage point) difference in mean 10-year cardiovascular disease risk comparing the lowest (Q1) and highest (Q5) wealth quintiles by country and modelled scenario, either Baseline, Diagnosis or Treatment scenario
+#### Supplementary Table `r count<- count+1; count`. Relative increase targets sensitivity analysis: Absolute (percentage point) difference in mean 10-year cardiovascular disease risk comparing the bottom (Q1) and top (Q5) wealth quintiles by country and modelled scenario, either Baseline, Diagnosis or Treatment scenario
 
 ```{r echo = FALSE}
 kbl(diff_table_rel,
@@ -925,7 +948,7 @@ kbl(abs_table_rel,
 
 \newpage
 
-#### Supplementary Table `r count<- count+1; count`. Relative increase targets sensitivity analysis: Mean relative decline (%) in CVD risk compared to baseline by country, wealth quintile, and scenario
+#### Supplementary Table `r count<- count+1; count`. Relative increase targets sensitivity analysis: Mean (95% uncertainty interval) relative decline (%) in CVD risk compared to baseline by country, wealth quintile, and scenario
 
 ```{r echo = FALSE}
 kbl(rel_table_rel,
@@ -939,7 +962,7 @@ kbl(rel_table_rel,
 
 \newpage
 
-#### Supplementary Table `r count<- count+1; count`. Within-country targets sensitivity analysis: Mean (95% confidence/uncertainty interval) 10-year CVD risk by country and wealth quintile in Baseline, Diagnosis, and Treatment scenarios
+#### Supplementary Table `r count<- count+1; count`. Within-country targets sensitivity analysis: Mean (95% uncertainty interval) 10-year CVD risk by country and wealth quintile in Diagnosis and Treatment scenarios
 
 ```{r echo = FALSE}
 kbl(cvd_sens,
@@ -948,14 +971,12 @@ kbl(cvd_sens,
   kable_styling(position = "left",
       latex_options = c("striped", "repeat_header", "scale_down"),
       stripe_color = "gray!15") 
-#%>%
- #column_spec(1, width = "5cm") 
 
 ```
 
 \newpage
 
-#### Supplementary Table `r count<- count+1; count`. Within-country targets sensitivity analysis: Absolute (percentage point) difference in mean 10-year cardiovascular disease risk comparing the lowest (Q1) and highest (Q5) wealth quintiles by country and modelled scenario, either Baseline, Diagnosis or Treatment scenario
+#### Supplementary Table `r count<- count+1; count`. Within-country targets sensitivity analysis: Absolute (percentage point) difference in mean 10-year cardiovascular disease risk comparing the bottom (Q1) and top (Q5) wealth quintiles by country and modelled scenario, either Baseline, Diagnosis or Treatment scenario
 
 ```{r echo = FALSE}
 kbl(diff_table_sens,
@@ -970,7 +991,7 @@ kbl(diff_table_sens,
 
 \newpage
 
-#### Supplementary Table `r count<- count+1; count`. Within-country targets sensitivity analysis: Mean ifference (95% uncertainty interval) in CVD cases per 1,000 people living with hypertension compared to baseline by country, wealth quintile, and scenario
+#### Supplementary Table `r count<- count+1; count`. Within-country targets sensitivity analysis: Mean difference (95% uncertainty interval) in CVD cases per 1,000 people living with hypertension compared to baseline by country, wealth quintile, and scenario
 
 ```{r echo = FALSE}
 
@@ -987,7 +1008,7 @@ kbl(abs_table_sens,
 
 \newpage
 
-#### Supplementary Table `r count<- count+1; count`. Within country targets sensitivity analysis: Mean relative decline (%) in CVD risk compared to baseline by country, wealth quintile, and scenario
+#### Supplementary Table `r count<- count+1; count`. Within country targets sensitivity analysis: Mean (95% uncertainty interval) relative decline (%) in CVD risk compared to baseline by country, wealth quintile, and scenario
 
 ```{r echo = FALSE}
 kbl(rel_table_sens,
@@ -1085,7 +1106,7 @@ footnote(general_title = "Note.",
 missing <- read.csv("1 Raw Data/missingness_table_sbp_clinhypt.csv")
 
 miss_table <- missing %>%
-  mutate(across(.cols = c(age_na_pct, sex_na_pct, sbp_na_pct, smk_na_pct, bmi_na_pct, wealth_na_pct, age_bound_pct), .fns = ~round(.*100,1))) %>%
+  mutate(across(.cols = c(age_na_pct, sex_na_pct, sbp_na_pct, smk_na_pct, bmi_na_pct, wealth_na_pct, age_bound_pct), .fns = ~sprintf("%.1f", round(.*100,1)))) %>%
   #select(Country, Year, Survey, N, 
   mutate('Age, missing, n (%)' = paste0(age_na," (", age_na_pct, "%)"), 
          #'Age, missing (%)' = age_na_pct,
@@ -1093,10 +1114,10 @@ miss_table <- missing %>%
          #'Age, out of bounds (%)'= age_bound_pct,
          'Sex, missing, n (%)' = paste0(sex_na," (", sex_na_pct, "%)"),  
          #'Sex, missing (%)' = sex_na_pct,
-         'N (with non-missing age and sex)' = n_agesex,
+        ##'N (non-missing age, sex)' = n_agesex,
          'SBP, missing, n (%)' = paste0(sbp_na," (", sbp_na_pct, "%)"), 
          #'SBP, missing (%)' = sbp_na_pct, 
-         'N (with non-missing age, sex, and hypertension status)' = n_agesex_hypt,
+        ##'N (non-missing age, sex, htn status)' = n_agesex_hypt,
          'Currently Smoking, missing, n (%)' = paste0(smk_na," (", smk_na_pct, "%)"), 
          #'Currently Smoking, missing (%)' = smk_na_pct, 
          'BMI, missing, n (%)' = paste0(bmi_na," (", bmi_na_pct, "%)"), 
@@ -1108,16 +1129,16 @@ miss_table <- missing %>%
 kbl(miss_table,
     booktabs = TRUE,
     longtable = TRUE) %>%
-  column_spec(1, width = "3 cm") %>%
-  column_spec(2:4, width = "1cm") %>%
-   column_spec(5:13, width = "1cm") %>%
+  column_spec(1:2, width = "3cm") %>%
+  column_spec(2:4, width = "2cm") %>%
+  column_spec(5:11, width = "1.5cm") %>%
   kable_styling(position = "left",
       latex_options = c("striped", "repeat_header", "scale_down"),
       stripe_color = "gray!15") %>%
 footnote(general_title = "Note.", 
            footnote_as_chunk = TRUE,
            threeparttable = TRUE,
-           general = "Age and sex missingness and out of bounds values are reported on the full survey sample. SBP missingness is reported on the sample that meet the inclusion criteria for age and sex. Currently smoking, BMI, and wealth quintile missingness is reported among the population of people living with hypertension that meet inclusion criteria for age, sex, and have non-missing SBP values. These values do not distinguish between 'do not know/refuse to respond' and 'missing because not eligible/asked'. In some surveys, specific sets of questions were only asked to a subset of the full survey sample.")
+           general = "Age and sex missingness and out of bounds values are reported on the full survey sample. Systolic Blood Pressure (SBP) missingness is reported on the sample that meet the inclusion criteria for age and sex. Currently smoking, Body Mass Index (BMI), and wealth quintile missingness is reported among the population of people living with hypertension that meet inclusion criteria for age, sex, and have non-missing SBP values. These values do not distinguish between 'do not know/refuse to respond' and 'missing because not eligible/asked'. In some surveys, specific sets of questions were only asked to a subset of the full survey sample.")
 
 ```
 
@@ -1161,7 +1182,7 @@ kbl(wealth,
 
 \newpage
 
-### Supplementary Table `r count<- count+1; count`. Relative Risks from Law et al. (2009) by age group
+### Supplementary Table `r count<- count+1; count`. Relative risks from Law et al. (2009) by age group
 
 ```{r echo = F}
 
@@ -1180,7 +1201,6 @@ footnote(general_title = "Source.",
 
 
 ```
-
 
 \newpage
 
@@ -1205,52 +1225,60 @@ countries = set_names(countries, countries)
 # cascades
 
 # edits to add 100% htn step
-prop_htn <- cascades %>%
-  group_by(Country, wealth_quintile, countryGDPclass) %>%
- summarize(cascade_variable = "prop_htn",
-         value = 100,
-         lower = 100,
-         upper = 100)
+#prop_htn <- cascades %>%
+#  group_by(Country, wealth_quintile, countryGDPclass) %>%
+# summarize(cascade_variable = "prop_htn",
+#         value = 100,
+#         lower = 100,
+#         upper = 100)
 
 cascade_q <- cascades %>%
-  rbind(prop_htn) %>%
+  #rbind(prop_htn) %>%
   mutate(cascade_variable = factor(cascade_variable,
                                    levels = c("prop_htn", "prop_aware", "prop_tx", "prop_control"),
                                    labels = c(" ", "Aware", "Treated", "Controlled"))) 
 
+green <- c("#78c679", "#41ab5d", "#238443", "#005a32", "#004529")
+
+df <- cascade_q %>%
+  filter(cascade_variable != "Hypertensives")
+
 cascade_levels <- function(x) {
   
-  for_plot <- cascade_q %>%
+  for_plot <- df %>%
     filter(Country==x)
-  
-# low income cascades by country and quintile
+
 label_cascades <- ggplot(data = for_plot, 
-               aes(x = factor(cascade_variable), 
-                    y = value, 
+               aes(x = factor(cascade_variable),
+                 #x = factor(cascade_variable), 
+                    y = value,
+                   #group = Country,
                     group = wealth_quintile, 
-                    colour = wealth_quintile)) +
-  geom_line(stat = "identity") +
+                    fill = wealth_quintile)) +
+  geom_col(position = "dodge") +
+  geom_errorbar(aes(ymin = lower, ymax = upper,
+                    group = wealth_quintile,
+                    color = wealth_quintile),
+                position = "dodge") +
   scale_y_continuous(labels = comma) +
-  scale_x_discrete(labels = c("", "Aware", "Treated", "Controlled"), expand = c(0.05,0.05)) +
   guides(fill=guide_legend(title="Wealth Quintile")) +
   labs(y = "Proportion of People Living with Hypertension", x = "",
        color = "Wealth Quintile",
        caption = "'Aware' refers to the proportion of people living with hypertension \n who are aware of their diagnosis. \n 'Treated' refers to the proportion of people living with hypertension \n who reported being on treatment for hypertension. \n 'Controlled' refers to the proportion of people living with hypertension \n who have controlled blood pressure.") +
   ggtitle(paste0(x, ":", " ", "Cascades by Wealth Quintile")) +
   theme_classic() +
-  theme(legend.position = "bottom",
-        panel.spacing.x = unit(2,"mm"),
-        axis.text.x = element_text(angle = -40),
-        strip.text = element_text(size = 6, 
-                                  margin = margin()),
-        title = element_text(size = 10)) +
-  theme(aspect.ratio=10/20) 
-  #coord_fixed(0.5) +
-  #facet_wrap(~Country)
-             #, scales = 'free') 
-             #, ncol=3) 
+  theme(aspect.ratio = 10/20,
+          legend.position = "bottom",
+          panel.spacing.x = unit(2, "mm"),
+          axis.text.x = element_text(angle = -40),
+          strip.text = element_text(size = 6, margin = margin()),
+          title = element_text(size = 10)) +
+  scale_fill_manual(values = green) +
+  scale_color_manual(values = green) +
+  ylim(0,100)
 
 label_cascades
+  
 }
 
 
@@ -1278,10 +1306,10 @@ dots <- ggplot(data = graph,
   #scale_fill_discrete(labels = c("Q1", "Q2", "Q3", "Q4", "Q5")) +
   guides(color=guide_legend(title="")) +
   labs(y = "Mean Decline (%) in CVD Risk from Baseline", x = "",
-       caption = "Note: Vertical bars represent 95% confidence intervals for Baseline and \n 95% uncertainty intervals for the Diagnosis and Treatment scenarios.") +
+       caption = "Note: Vertical bars represent 95% uncertainty intervals \n for the Diagnosis and Treatment scenarios.") +
   ggtitle(paste0(x,":"," ", "Mean Decline (%) in CVD Risk \n from Baseline")) +
   theme_classic() +
-  ylim(0,35) +
+  ylim(-1.5,35) +
   theme(legend.position="bottom",
        # legend.text = element_text(size = 16),
         axis.text.x = element_text(color = "black", size = 13),
@@ -1322,10 +1350,10 @@ dots <- ggplot(data = graph,
   #scale_fill_discrete(labels = c("Q1", "Q2", "Q3", "Q4", "Q5")) +
   guides(color=guide_legend(title="")) +
   labs(y = "Mean difference in CVD cases per 1,000 people", x = "",
-       caption = "Note: Vertical bars represent 95% confidence intervals for Baseline and \n 95% uncertainty intervals for the Diagnosis and Treatment scenarios.") +
+       caption = "Note: Vertical bars represent 95% uncertainty intervals \n for the Diagnosis and Treatment scenarios.") +
   ggtitle(paste0(x,":"," ", "Mean Difference in CVD Cases \n per 1,000 People Living with Hypertension")) +
           #":"," ", "Mean Difference in CVD cases per 1,000 people")) +
-    ylim(0,70) +
+    ylim(-2,70) +
   theme_classic() +
   theme(legend.position="bottom",
        # legend.text = element_text(size = 16),
@@ -1345,7 +1373,7 @@ dots
 dots_cvd <- function(x){
   
   mean_risk<- mean_risk %>%
-    filter(scenario_type == "overall")
+    filter(scenario_type == "overall" | scenario_type == "baseline")
   
   graph_cvd2 <- mean_risk %>%
     filter(country == x)
@@ -1395,7 +1423,6 @@ mean_cvd_plots <- map(countries, ~dots_cvd(.))
 ```{r echo = F, results='asis', fig.dim = c(9, 6)}
 
 for (i in 1:44){
-  
 p1 <- cascade_plots[[i]]
 p2 <- mean_cvd_plots[[i]]
 p3 <- country_plots[[i]]

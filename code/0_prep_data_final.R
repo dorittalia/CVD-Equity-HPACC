@@ -1,3 +1,5 @@
+## This script prepares the dataset for analysis.
+
 rm(list = ls())
 
 library(ggplot2)
