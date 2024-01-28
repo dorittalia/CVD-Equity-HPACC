@@ -1,6 +1,6 @@
 # Hypertension care cascades and reducing inequities in cardiovascular disease in low- and middle-income countries
 
-This repository contains replication code for Stein et al. paper "Hypertension care cascades and reducing inequities in cardiovascular disease in low- and middle-income countries"
+This repository contains replication code for Stein et al. paper "Hypertension care cascades and reducing inequities in cardiovascular disease in low- and middle-income countries". Nature Medicine. 2024.
 
 ### Prerequisites
 
